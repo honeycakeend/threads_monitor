@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Threads Monitor Bot</title>
+  <style>
+    :root {
+      --bg: #f7f4ef;
+      --ink: #1a1a1a;
+      --muted: #5c5c5c;
+      --accent: #0b5fff;
+      --card: #fffdf9;
+      --line: #e5dfd4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #efe6d8 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #dde8f7 0%, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      line-height: 1.65;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: clamp(1.8rem, 4vw, 2.4rem);
+      line-height: 1.2;
+      margin: 0 0 0.5rem;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    h2 {
+      font-size: 1.2rem;
+      margin: 2rem 0 0.75rem;
+    }
+    p, li { color: var(--ink); }
+    ul { padding-left: 1.2rem; }
+    a { color: var(--accent); }
+    .box {
+      background: var(--card);
+      border: 1px solid var(--line);
+      padding: 1rem 1.15rem;
+      margin: 1.25rem 0;
+    }
+    nav a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="data-deletion.html">Data Deletion</a>
+    </nav>
+
+    <h1>Privacy Policy</h1>
+    <p class="meta">
+      Threads Monitor Bot<br />
+      Last updated: July 19, 2026
+    </p>
+
+    <div class="box">
+      <strong>Operator contact:</strong>
+      <!-- Replace with your real contact email before publishing -->
+      <a href="mailto:honeycakeend@gmail.com">honeycakeend@gmail.com</a>
+    </div>
+
+    <p>
+      This Privacy Policy describes how <strong>Threads Monitor Bot</strong>
+      (“the App”, “we”) collects, uses, and stores information when you use our
+      Telegram bot that searches and monitors public Threads posts via the
+      official Meta Threads API.
+    </p>
+
+    <h2>1. What the App does</h2>
+    <p>
+      The App helps users monitor conversations on Threads by keyword or phrase.
+      Users can run one-off searches and subscribe to recurring checks that send
+      Telegram notifications when new matching posts appear.
+    </p>
+
+    <h2>2. Information we collect</h2>
+    <p>Depending on how you use the App, we may process:</p>
+    <ul>
+      <li>
+        <strong>Telegram data:</strong> Telegram user ID, chat ID, and messages
+        you send to the bot (commands and search phrases).
+      </li>
+      <li>
+        <strong>Search and monitoring data:</strong> keyword/phrase pool items,
+        poll interval settings, and identifiers of posts already seen or notified
+        (to avoid duplicate alerts).
+      </li>
+      <li>
+        <strong>Threads / Meta platform data:</strong> data returned by the
+        Threads API for keyword search, such as post ID, text, username,
+        permalink, timestamp, and related public post metadata. Access is granted
+        through Meta OAuth / access tokens with permissions such as
+        <code>threads_basic</code> and <code>threads_keyword_search</code>.
+      </li>
+      <li>
+        <strong>Technical logs:</strong> application logs needed to operate and
+        debug the service (for example API errors), which may include chat IDs
+        or phrase text.
+      </li>
+    </ul>
+    <p>We do not intentionally collect payment card data or government IDs.</p>
+
+    <h2>3. How we use information</h2>
+    <ul>
+      <li>To perform keyword / topic searches on Threads on your behalf.</li>
+      <li>To send Telegram notifications about new matching posts.</li>
+      <li>To remember your monitoring preferences and avoid duplicate alerts.</li>
+      <li>To maintain security (for example allowlists of Telegram user IDs).</li>
+      <li>To improve reliability and fix errors.</li>
+    </ul>
+    <p>
+      We use Threads platform data only for the purposes allowed by Meta’s
+      Platform Terms and the approved use of <code>threads_keyword_search</code>
+      (helping users manage social media presence by finding and reviewing
+      keyword-related public content).
+    </p>
+
+    <h2>4. Legal basis / consent</h2>
+    <p>
+      You choose to use the App and grant required Telegram and Meta/Threads
+      permissions. You can stop using the App and request deletion of your data
+      at any time (see
+      <a href="data-deletion.html">Data Deletion Instructions</a>).
+    </p>
+
+    <h2>5. Sharing of information</h2>
+    <p>We do not sell personal data. We may share data only with:</p>
+    <ul>
+      <li>
+        <strong>Meta / Threads</strong> — when calling the official Threads API
+        with your authorized access token.
+      </li>
+      <li>
+        <strong>Telegram</strong> — to deliver bot messages and notifications.
+      </li>
+      <li>
+        Service providers strictly necessary to host the App (for example a VPS
+        or cloud host), under confidentiality obligations.
+      </li>
+      <li>
+        Authorities if required by applicable law.
+      </li>
+    </ul>
+
+    <h2>6. Storage and retention</h2>
+    <p>
+      Data is stored in a local application database (SQLite) on the server that
+      runs the bot. We retain monitoring phrases, chat settings, and seen-post
+      identifiers while your monitoring remains active or until you request
+      deletion. Logs are kept only as long as needed for operations and
+      troubleshooting, then discarded or rotated.
+    </p>
+
+    <h2>7. Security</h2>
+    <p>
+      Access tokens and secrets are stored in server environment configuration,
+      not in the public repository. Access to the bot may be restricted to
+      allowlisted Telegram user IDs. No security measure is perfect; please
+      contact us if you suspect unauthorized access.
+    </p>
+
+    <h2>8. Your rights</h2>
+    <p>Subject to applicable law, you may request:</p>
+    <ul>
+      <li>Access to the data we hold about your use of the App</li>
+      <li>Correction of inaccurate data</li>
+      <li>Deletion of your data (see Data Deletion Instructions)</li>
+      <li>Withdrawal of Meta/Threads authorization via Meta account settings</li>
+    </ul>
+
+    <h2>9. Children’s privacy</h2>
+    <p>
+      The App is not directed to children under 13 (or the minimum age required
+      in your jurisdiction). We do not knowingly collect data from children.
+    </p>
+
+    <h2>10. International transfers</h2>
+    <p>
+      Depending on where the bot is hosted and where Meta/Telegram process data,
+      information may be processed in countries other than your own. Those
+      services apply their own privacy terms.
+    </p>
+
+    <h2>11. Changes</h2>
+    <p>
+      We may update this Policy from time to time. The “Last updated” date at
+      the top will change when we do. Continued use of the App after changes
+      means you accept the updated Policy.
+    </p>
+
+    <h2>12. Contact</h2>
+    <p>
+      Questions about privacy or data requests:
+      <a href="mailto:honeycakeend@gmail.com">honeycakeend@gmail.com</a>
+    </p>
+  </main>
+</body>
+</html>
