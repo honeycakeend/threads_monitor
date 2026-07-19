@@ -1,47 +1,28 @@
-# Legal pages for Meta App Review
+# Threads Monitor Bot — legal pages
 
-Static pages to host publicly (HTTPS) and paste into Meta App Dashboard.
+Public legal documents required for Meta App Review.
 
-| File | Meta field |
-|------|------------|
-| `privacy-policy.html` | Privacy Policy URL |
-| `data-deletion.html` | Data Deletion Instructions URL |
-| `index.html` | Optional landing page |
+## Public URLs
 
-## Before publishing
+- Legal documents: https://honeycakeend.github.io/threads_monitor/
+- Privacy Policy: https://honeycakeend.github.io/threads_monitor/privacy-policy.html
+- Data Deletion Instructions: https://honeycakeend.github.io/threads_monitor/data-deletion.html
 
-1. Contact email is set to `honeycakeend@gmail.com`.
-2. Optionally rename “Threads Monitor Bot” if your Meta app display name differs.
+Contact email: `honeycakeend@gmail.com`.
 
-## Host on GitHub Pages (fastest)
+## Enable GitHub Pages
 
-1. Push this repo to GitHub (do **not** commit `.env`).
-2. Repo → **Settings → Pages**:
-   - Source: Deploy from a branch
-   - Branch: `main` (or `master`)
-   - Folder: `/docs`
-3. After deploy, URLs will look like:
+1. Open [repository Pages settings](https://github.com/honeycakeend/threads_monitor/settings/pages).
+2. Under **Build and deployment**, select **Deploy from a branch**.
+3. Select branch **main** and folder **/docs**, then click **Save**.
+4. Wait for deployment to finish.
+5. Open the Privacy Policy and Data Deletion URLs above in a private browser window and verify that both return a page without requiring authentication.
 
-```text
-https://YOUR_GITHUB_USER.github.io/REPO_NAME/
-https://YOUR_GITHUB_USER.github.io/REPO_NAME/privacy-policy.html
-https://YOUR_GITHUB_USER.github.io/REPO_NAME/data-deletion.html
-```
+## Configure the Meta app
 
-4. Open both URLs in a private window — they must load without login.
+Open [Meta App Dashboard](https://developers.facebook.com/apps/), select the app, and enter:
 
-## Paste into Meta
+- **Privacy Policy URL:** `https://honeycakeend.github.io/threads_monitor/privacy-policy.html`
+- **User Data Deletion / Data Deletion Instructions URL:** `https://honeycakeend.github.io/threads_monitor/data-deletion.html`
 
-1. [developers.facebook.com](https://developers.facebook.com/apps/) → your app
-2. **Settings → Basic**
-3. **Privacy Policy URL** → `.../privacy-policy.html`
-4. **User data deletion** / Data Deletion Instructions URL → `.../data-deletion.html`
-5. Save changes
-
-## Local preview
-
-```bash
-cd docs
-python -m http.server 8080
-# open http://127.0.0.1:8080/
-```
+Save the settings only after both GitHub Pages URLs are publicly accessible.
