@@ -1,5 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 import aiosqlite
 
@@ -46,7 +48,76 @@ CREATE TABLE IF NOT EXISTS bot_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS threads_oauth_states (
+    state_hash TEXT PRIMARY KEY,
+    telegram_user_id INTEGER NOT NULL,
+    target_chat_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_oauth_states_expiry
+    ON threads_oauth_states(expires_at);
+
+CREATE TABLE IF NOT EXISTS threads_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    threads_user_id TEXT NOT NULL UNIQUE,
+    username TEXT,
+    access_token_encrypted BLOB,
+    token_type TEXT NOT NULL DEFAULT 'bearer',
+    expires_at TEXT,
+    refreshed_at TEXT,
+    connected_by_telegram_user_id INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    disconnected_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS threads_chat_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by_telegram_user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(account_id, chat_id),
+    FOREIGN KEY (account_id) REFERENCES threads_accounts(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_binding_primary_per_account
+    ON threads_chat_bindings(account_id)
+    WHERE is_primary = 1 AND active = 1;
+
+CREATE TABLE IF NOT EXISTS threads_data_deletion_requests (
+    confirmation_code TEXT PRIMARY KEY,
+    threads_user_id_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_deletion_user_hash
+    ON threads_data_deletion_requests(threads_user_id_hash);
 """
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def to_db_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def from_db_timestamp(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 
 def split_phrases(raw: str) -> list[str]:
@@ -80,15 +151,17 @@ def format_interval_advice(phrase_count: int, interval_minutes: int) -> str:
 
 
 class Database:
-    def __init__(self, path: str | None = None) -> None:
-        self._path = str(path or settings.database_path)
+    def __init__(self, path: str | Path | None = None) -> None:
+        self._path_obj = Path(path or settings.database_path)
+        self._path = str(self._path_obj)
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[aiosqlite.Connection]:
-        settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._path_obj.parent.mkdir(parents=True, exist_ok=True)
         db = await aiosqlite.connect(self._path)
         db.row_factory = aiosqlite.Row
         try:
+            await db.execute("PRAGMA foreign_keys = ON")
             await db.executescript(SCHEMA)
             await self._migrate(db)
             await db.commit()
@@ -184,8 +257,16 @@ class Database:
         async with self.connection() as db:
             cursor = await db.execute(
                 """
-                SELECT chat_id FROM chat_settings
-                WHERE monitoring_enabled = 1
+                SELECT DISTINCT cs.chat_id
+                FROM chat_settings AS cs
+                JOIN threads_chat_bindings AS b
+                  ON b.chat_id = cs.chat_id
+                 AND b.active = 1
+                JOIN threads_accounts AS a
+                  ON a.id = b.account_id
+                 AND a.active = 1
+                 AND a.access_token_encrypted IS NOT NULL
+                WHERE cs.monitoring_enabled = 1
                 """
             )
             rows = await cursor.fetchall()
@@ -347,6 +428,317 @@ class Database:
                 (phrase_id,),
             )
             await db.commit()
+
+    async def create_oauth_state(
+        self,
+        *,
+        state_hash: str,
+        telegram_user_id: int,
+        target_chat_id: int,
+        expires_at: datetime,
+    ) -> None:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute(
+                """
+                UPDATE threads_oauth_states
+                SET consumed_at = ?
+                WHERE telegram_user_id = ? AND consumed_at IS NULL
+                """,
+                (now, telegram_user_id),
+            )
+            await db.execute(
+                """
+                INSERT INTO threads_oauth_states (
+                    state_hash, telegram_user_id, target_chat_id,
+                    expires_at, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    state_hash,
+                    telegram_user_id,
+                    target_chat_id,
+                    to_db_timestamp(expires_at),
+                    now,
+                ),
+            )
+            await db.execute(
+                """
+                DELETE FROM threads_oauth_states
+                WHERE expires_at <= ? AND consumed_at IS NOT NULL
+                """,
+                (now,),
+            )
+            await db.commit()
+
+    async def consume_oauth_state(self, state_hash: str) -> dict | None:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                UPDATE threads_oauth_states
+                SET consumed_at = ?
+                WHERE state_hash = ?
+                  AND consumed_at IS NULL
+                  AND expires_at > ?
+                RETURNING telegram_user_id, target_chat_id, expires_at, created_at
+                """,
+                (now, state_hash, now),
+            )
+            row = await cursor.fetchone()
+            await db.commit()
+            return dict(row) if row else None
+
+    async def upsert_threads_connection(
+        self,
+        *,
+        threads_user_id: str,
+        username: str | None,
+        access_token_encrypted: bytes,
+        token_type: str,
+        expires_at: datetime,
+        connected_by_telegram_user_id: int,
+        target_chat_id: int,
+    ) -> int:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+
+            # Version 1 intentionally has one active Threads account. Rows are retained
+            # without credentials so the schema can later support multiple accounts.
+            await db.execute(
+                """
+                UPDATE threads_accounts
+                SET active = 0,
+                    access_token_encrypted = NULL,
+                    disconnected_at = ?,
+                    updated_at = ?
+                WHERE threads_user_id != ? AND active = 1
+                """,
+                (now, now, threads_user_id),
+            )
+            await db.execute(
+                """
+                UPDATE threads_chat_bindings
+                SET active = 0, is_primary = 0, updated_at = ?
+                WHERE account_id IN (
+                    SELECT id FROM threads_accounts WHERE threads_user_id != ?
+                ) AND active = 1
+                """,
+                (now, threads_user_id),
+            )
+
+            await db.execute(
+                """
+                INSERT INTO threads_accounts (
+                    threads_user_id, username, access_token_encrypted, token_type,
+                    expires_at, refreshed_at, connected_by_telegram_user_id,
+                    active, created_at, updated_at, disconnected_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+                ON CONFLICT(threads_user_id) DO UPDATE SET
+                    username = excluded.username,
+                    access_token_encrypted = excluded.access_token_encrypted,
+                    token_type = excluded.token_type,
+                    expires_at = excluded.expires_at,
+                    refreshed_at = excluded.refreshed_at,
+                    connected_by_telegram_user_id = excluded.connected_by_telegram_user_id,
+                    active = 1,
+                    updated_at = excluded.updated_at,
+                    disconnected_at = NULL
+                """,
+                (
+                    threads_user_id,
+                    username,
+                    access_token_encrypted,
+                    token_type,
+                    to_db_timestamp(expires_at),
+                    now,
+                    connected_by_telegram_user_id,
+                    now,
+                    now,
+                ),
+            )
+            cursor = await db.execute(
+                "SELECT id FROM threads_accounts WHERE threads_user_id = ?",
+                (threads_user_id,),
+            )
+            row = await cursor.fetchone()
+            assert row is not None
+            account_id = int(row["id"])
+
+            await db.execute(
+                """
+                UPDATE threads_chat_bindings
+                SET is_primary = 0, updated_at = ?
+                WHERE account_id = ? AND active = 1
+                """,
+                (now, account_id),
+            )
+            await db.execute(
+                """
+                INSERT INTO threads_chat_bindings (
+                    account_id, chat_id, is_primary, active,
+                    created_by_telegram_user_id, created_at, updated_at
+                ) VALUES (?, ?, 1, 1, ?, ?, ?)
+                ON CONFLICT(account_id, chat_id) DO UPDATE SET
+                    is_primary = 1,
+                    active = 1,
+                    created_by_telegram_user_id = excluded.created_by_telegram_user_id,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    account_id,
+                    target_chat_id,
+                    connected_by_telegram_user_id,
+                    now,
+                    now,
+                ),
+            )
+            await db.execute(
+                """
+                INSERT INTO chat_settings (chat_id, monitoring_enabled)
+                VALUES (?, 1)
+                ON CONFLICT(chat_id) DO NOTHING
+                """,
+                (target_chat_id,),
+            )
+            await db.commit()
+            return account_id
+
+    async def get_active_threads_account(self) -> dict | None:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                """
+                SELECT
+                    a.id, a.threads_user_id, a.username,
+                    a.access_token_encrypted, a.token_type, a.expires_at,
+                    a.refreshed_at, a.connected_by_telegram_user_id,
+                    b.chat_id AS primary_chat_id
+                FROM threads_accounts AS a
+                LEFT JOIN threads_chat_bindings AS b
+                    ON b.account_id = a.id
+                   AND b.active = 1
+                   AND b.is_primary = 1
+                WHERE a.active = 1 AND a.access_token_encrypted IS NOT NULL
+                ORDER BY a.updated_at DESC
+                LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def update_threads_token(
+        self,
+        *,
+        account_id: int,
+        expected_access_token_encrypted: bytes,
+        access_token_encrypted: bytes,
+        token_type: str,
+        expires_at: datetime,
+    ) -> bool:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            cursor = await db.execute(
+                """
+                UPDATE threads_accounts
+                SET access_token_encrypted = ?, token_type = ?, expires_at = ?,
+                    refreshed_at = ?, updated_at = ?
+                WHERE id = ?
+                  AND active = 1
+                  AND access_token_encrypted = ?
+                """,
+                (
+                    access_token_encrypted,
+                    token_type,
+                    to_db_timestamp(expires_at),
+                    now,
+                    now,
+                    account_id,
+                    expected_access_token_encrypted,
+                ),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def disconnect_active_threads_account(self) -> bool:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                UPDATE threads_accounts
+                SET active = 0, access_token_encrypted = NULL,
+                    disconnected_at = ?, updated_at = ?
+                WHERE active = 1
+                """,
+                (now, now),
+            )
+            await db.execute(
+                """
+                UPDATE threads_chat_bindings
+                SET active = 0, is_primary = 0, updated_at = ?
+                WHERE active = 1
+                """,
+                (now,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def delete_threads_user_data(self, threads_user_id: str) -> bool:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                "DELETE FROM threads_accounts WHERE threads_user_id = ?",
+                (threads_user_id,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def record_data_deletion(
+        self,
+        *,
+        confirmation_code: str,
+        threads_user_id_hash: str,
+    ) -> str:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute(
+                """
+                INSERT INTO threads_data_deletion_requests (
+                    confirmation_code, threads_user_id_hash, status,
+                    requested_at, completed_at
+                ) VALUES (?, ?, 'completed', ?, ?)
+                ON CONFLICT(threads_user_id_hash) DO UPDATE SET
+                    status = 'completed',
+                    completed_at = excluded.completed_at
+                """,
+                (confirmation_code, threads_user_id_hash, now, now),
+            )
+            cursor = await db.execute(
+                """
+                SELECT confirmation_code
+                FROM threads_data_deletion_requests
+                WHERE threads_user_id_hash = ?
+                """,
+                (threads_user_id_hash,),
+            )
+            row = await cursor.fetchone()
+            await db.commit()
+            assert row is not None
+            return str(row["confirmation_code"])
+
+    async def get_data_deletion_status(self, confirmation_code: str) -> dict | None:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                """
+                SELECT confirmation_code, status, requested_at, completed_at
+                FROM threads_data_deletion_requests
+                WHERE confirmation_code = ?
+                """,
+                (confirmation_code,),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     # Backward-compatible aliases used elsewhere in the project
     async def list_queries(self, chat_id: int) -> list[dict]:

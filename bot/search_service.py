@@ -3,11 +3,24 @@ from html import escape
 from bot.config import SearchMode, SearchType
 from bot.models import SearchResult, ThreadPost
 from bot.threads_client import ThreadsClient
+from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
 
 
 class SearchService:
-    def __init__(self, client: ThreadsClient | None = None) -> None:
+    def __init__(
+        self,
+        client: ThreadsClient | None = None,
+        token_manager: ThreadsTokenManager | None = None,
+    ) -> None:
         self._client = client or ThreadsClient()
+        self._token_manager = token_manager
+
+    async def _resolve_token(self, access_token: str | None) -> str:
+        if access_token:
+            return access_token
+        if self._token_manager is None:
+            raise ThreadsNotConnectedError("Threads account is not connected")
+        return await self._token_manager.get_access_token()
 
     async def search_by_keyword(
         self,
@@ -16,12 +29,14 @@ class SearchService:
         search_type: SearchType = SearchType.RECENT,
         search_mode: SearchMode = SearchMode.KEYWORD,
         limit: int | None = None,
+        access_token: str | None = None,
     ) -> SearchResult:
         return await self._client.keyword_search(
             query,
             search_type=search_type,
             search_mode=search_mode,
             limit=limit,
+            access_token=await self._resolve_token(access_token),
         )
 
     async def search_by_tag(
@@ -30,6 +45,7 @@ class SearchService:
         *,
         search_type: SearchType = SearchType.TOP,
         limit: int | None = None,
+        access_token: str | None = None,
     ) -> SearchResult:
         normalized = tag.lstrip("#").strip()
         return await self._client.keyword_search(
@@ -37,6 +53,7 @@ class SearchService:
             search_type=search_type,
             search_mode=SearchMode.TAG,
             limit=limit,
+            access_token=await self._resolve_token(access_token),
         )
 
 
@@ -68,14 +85,16 @@ def format_post(post: ThreadPost, index: int) -> str:
         lines.append(f"🏷 {', '.join(flags)}")
 
     if post.permalink:
-        lines.append(f'🔗 <a href="{post.permalink}">Открыть в Threads</a>')
+        lines.append(
+            f'🔗 <a href="{escape(str(post.permalink))}">Открыть в Threads</a>'
+        )
 
     return "\n".join(lines)
 
 
 def format_search_result(result: SearchResult, *, max_posts: int = 10) -> list[str]:
     if not result.posts:
-        return [f'По запросу «{result.query}» ничего не найдено.']
+        return [f'По запросу «{escape(result.query)}» ничего не найдено.']
 
     header = (
         f'🔍 Запрос: <b>{escape(result.query)}</b>\n'
@@ -84,9 +103,8 @@ def format_search_result(result: SearchResult, *, max_posts: int = 10) -> list[s
     messages = [header]
 
     chunk = ""
-    shown = 0
     for index, post in enumerate(result.posts, start=1):
-        if shown >= max_posts:
+        if index > max_posts:
             messages.append(f"... и ещё {result.total - max_posts} пост(ов)")
             break
 
@@ -96,7 +114,6 @@ def format_search_result(result: SearchResult, *, max_posts: int = 10) -> list[s
             chunk = block
         else:
             chunk += block
-        shown += 1
 
     if chunk.strip():
         messages.append(chunk.rstrip())

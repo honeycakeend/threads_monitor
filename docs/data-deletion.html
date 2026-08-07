@@ -69,7 +69,7 @@
     <h1>Data Deletion Instructions</h1>
     <p class="meta">
       Threads Monitor Bot<br />
-      Last updated: July 19, 2026
+      Last updated: August 7, 2026
     </p>
 
     <p>
@@ -90,6 +90,7 @@
     <p>Upon a verified request, we delete or anonymize:</p>
     <ul>
       <li>Your Telegram chat monitoring settings</li>
+      <li>The encrypted Threads access token, Threads account metadata, and chat binding</li>
       <li>Search phrases you added to the monitoring pool (when they are tied to your use of the App)</li>
       <li>Records of seen / notified post IDs related to your monitoring</li>
       <li>Related application logs that still contain your identifiers, where reasonably feasible</li>
@@ -139,13 +140,17 @@
       <li>Remove phrases with <code>/remove</code></li>
       <li>Block or delete the bot chat in Telegram</li>
       <li>Revoke the App’s Threads permissions in your Meta account settings</li>
+      <li>If you are the bot administrator, send <code>/disconnect_threads</code> in a private chat</li>
     </ul>
 
     <h2>5. Meta / Facebook data deletion callback</h2>
     <p>
       If Meta sends a platform data-deletion callback for a user who authorized
-      the App, we process that request according to Meta’s requirements and
-      remove stored App data linked to that authorization where applicable.
+      the App, the App verifies Meta’s signed request, removes the encrypted
+      Threads credential and account/chat binding, and returns a confirmation
+      code with a public completion-status URL. Operational monitoring data that
+      is not keyed to the authorizing Threads user is handled through the
+      verified email-request process above.
     </p>
 
     <h2>6. Contact</h2>

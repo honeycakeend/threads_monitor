@@ -52,10 +52,11 @@ mkdir -p "$APP_DIR/data"
 
 if [ ! -f "$APP_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-  echo ">>> Created $APP_DIR/.env — you MUST edit it and set the tokens."
+  echo ">>> Created $APP_DIR/.env — you MUST edit it and set credentials."
 fi
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+chmod 600 "$APP_DIR/.env"
 
 echo ">>> Installing systemd service"
 cp "$APP_DIR/deploy/threads-bot.service" "/etc/systemd/system/${SERVICE}.service"
@@ -65,7 +66,7 @@ systemctl enable "$SERVICE"
 echo
 echo "==================================================================="
 echo "Setup complete."
-echo "1) Edit tokens:   sudo nano $APP_DIR/.env"
+echo "1) Edit config:   sudo nano $APP_DIR/.env"
 echo "2) Start the bot: sudo systemctl start $SERVICE"
 echo "3) Check logs:    sudo journalctl -u $SERVICE -f"
 echo "==================================================================="
