@@ -20,11 +20,11 @@ class ThreadsAPIError(Exception):
 class ThreadsClient:
     def __init__(
         self,
-        access_token: str | None = None,
         base_url: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._access_token = access_token or settings.threads_access_token
         self._base_url = (base_url or settings.threads_api_base).rstrip("/")
+        self._http_client = http_client
 
     async def keyword_search(
         self,
@@ -37,11 +37,10 @@ class ThreadsClient:
         since: int | str | None = None,
         until: int | str | None = None,
         author_username: str | None = None,
+        access_token: str,
     ) -> SearchResult:
-        if not self._access_token:
-            raise ThreadsAPIError(
-                "THREADS_ACCESS_TOKEN is not configured. Add it to .env when ready."
-            )
+        if not access_token:
+            raise ThreadsAPIError("Threads account is not connected")
 
         params: dict[str, Any] = {
             "q": query.strip(),
@@ -49,7 +48,6 @@ class ThreadsClient:
             "search_mode": search_mode.value,
             "fields": DEFAULT_FIELDS,
             "limit": min(limit or settings.default_search_limit, 100),
-            "access_token": self._access_token,
         }
 
         if media_type is not None:
@@ -61,24 +59,39 @@ class ThreadsClient:
         if author_username:
             params["author_username"] = author_username.lstrip("@")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{self._base_url}/keyword_search",
-                params=params,
-            )
+        try:
+            if self._http_client is not None:
+                response = await self._http_client.get(
+                    f"{self._base_url}/keyword_search",
+                    params=params,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            else:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(
+                        f"{self._base_url}/keyword_search",
+                        params=params,
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+        except httpx.HTTPError:
+            raise ThreadsAPIError("Could not reach the Threads API") from None
 
         if response.status_code >= 400:
             self._raise_api_error(response)
 
-        payload = response.json()
-        posts = [ThreadPost.from_api(item) for item in payload.get("data", [])]
+        try:
+            payload = response.json()
+            raw_posts = payload.get("data", [])
+            if not isinstance(raw_posts, list):
+                raise TypeError
+            posts = [ThreadPost.from_api(item) for item in raw_posts]
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise ThreadsAPIError("Threads API returned an unexpected response") from None
         return SearchResult(query=query.strip(), posts=posts, total=len(posts))
 
     @staticmethod
     def _raise_api_error(response: httpx.Response) -> None:
-        try:
-            payload = response.json()
-            message = payload.get("error", {}).get("message", response.text)
-        except ValueError:
-            message = response.text
-        raise ThreadsAPIError(message, status_code=response.status_code)
+        raise ThreadsAPIError(
+            f"Threads API rejected the request (HTTP {response.status_code})",
+            status_code=response.status_code,
+        )

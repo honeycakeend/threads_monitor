@@ -7,10 +7,12 @@ Wants=network-online.target
 Type=simple
 User=threadsbot
 WorkingDirectory=/opt/threads_bot
+EnvironmentFile=/opt/threads_bot/.env
 ExecStart=/opt/threads_bot/.venv/bin/python /opt/threads_bot/main.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+UMask=0077
 
 # Hardening
 NoNewPrivileges=true
@@ -18,6 +20,10 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/opt/threads_bot/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target

@@ -4,22 +4,24 @@ from html import escape
 
 from aiogram import Bot
 
-from bot.config import SearchType, settings
+from bot.config import SearchType
 from bot.models import ThreadPost
 from bot.search_service import SearchService, format_post
 from bot.storage import Database
 from bot.threads_client import ThreadsAPIError
+from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
 
 logger = logging.getLogger(__name__)
 
 
 class WatcherStats:
-    __slots__ = ("phrases_checked", "posts_sent", "errors")
+    __slots__ = ("errors", "not_connected", "phrases_checked", "posts_sent")
 
     def __init__(self) -> None:
         self.phrases_checked = 0
         self.posts_sent = 0
         self.errors = 0
+        self.not_connected = False
 
 
 class SearchWatcher:
@@ -29,10 +31,12 @@ class SearchWatcher:
         *,
         database: Database | None = None,
         search_service: SearchService | None = None,
+        token_manager: ThreadsTokenManager,
     ) -> None:
         self._bot = bot
         self._db = database or Database()
         self._search = search_service or SearchService()
+        self._token_manager = token_manager
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -56,10 +60,6 @@ class SearchWatcher:
 
     async def run_once(self) -> WatcherStats:
         stats = WatcherStats()
-        if not settings.threads_configured:
-            logger.warning("Watcher skipped: THREADS_ACCESS_TOKEN is not configured")
-            return stats
-
         phrases = await self._db.list_active_phrases_for_monitoring()
         stats.phrases_checked = len(phrases)
         if not phrases:
@@ -70,9 +70,16 @@ class SearchWatcher:
             logger.info("Watcher skipped: no chats with monitoring enabled")
             return stats
 
+        try:
+            access_token = await self._token_manager.get_access_token()
+        except ThreadsNotConnectedError:
+            stats.not_connected = True
+            logger.info("Watcher skipped: Threads account is not connected")
+            return stats
+
         for phrase in phrases:
             try:
-                sent = await self._process_phrase(phrase, chat_ids)
+                sent = await self._process_phrase(phrase, chat_ids, access_token)
                 stats.posts_sent += sent
             except ThreadsAPIError as exc:
                 stats.errors += 1
@@ -105,11 +112,17 @@ class SearchWatcher:
             except asyncio.TimeoutError:
                 continue
 
-    async def _process_phrase(self, phrase: dict, chat_ids: list[int]) -> int:
+    async def _process_phrase(
+        self,
+        phrase: dict,
+        chat_ids: list[int],
+        access_token: str,
+    ) -> int:
         search_type = SearchType(phrase["search_type"])
         result = await self._search.search_by_keyword(
             phrase["phrase"],
             search_type=search_type,
+            access_token=access_token,
         )
 
         initialized = bool(phrase["initialized"])

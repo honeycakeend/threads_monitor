@@ -1,0 +1,12 @@
+# Caddy obtains and renews the TLS certificate automatically after ports 80/443
+# reach this host. Do not enable request logging for OAuth callback query strings.
+threads-auth.adigitalnyc.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8080
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+}

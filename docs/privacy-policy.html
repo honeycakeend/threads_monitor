@@ -66,7 +66,7 @@
     <h1>Privacy Policy</h1>
     <p class="meta">
       Threads Monitor Bot<br />
-      Last updated: July 19, 2026
+      Last updated: August 7, 2026
     </p>
 
     <div class="box">
@@ -107,6 +107,12 @@
         permalink, timestamp, and related public post metadata. Access is granted
         through Meta OAuth / access tokens with permissions such as
         <code>threads_basic</code> and <code>threads_keyword_search</code>.
+      </li>
+      <li>
+        <strong>Threads authorization data:</strong> Threads user ID, username,
+        token expiry, a Telegram-chat binding, and the long-lived access token
+        encrypted at rest. Short-lived tokens and authorization codes are used
+        only to complete OAuth and are not intentionally retained.
       </li>
       <li>
         <strong>Technical logs:</strong> application logs needed to operate and
@@ -169,10 +175,14 @@
 
     <h2>7. Security</h2>
     <p>
-      Access tokens and secrets are stored in server environment configuration,
-      not in the public repository. Access to the bot may be restricted to
-      allowlisted Telegram user IDs. No security measure is perfect; please
-      contact us if you suspect unauthorized access.
+      Threads access tokens are encrypted before storage in SQLite. The
+      encryption key and Meta app secret are supplied through protected server
+      environment configuration and are not stored in the public repository.
+      OAuth links use a short-lived, one-time random state; callback query
+      strings are excluded from application access logs. Access to the bot and
+      account connection commands is restricted to allowlisted Telegram user
+      IDs. No security measure is perfect; please contact us if you suspect
+      unauthorized access.
     </p>
 
     <h2>8. Your rights</h2>
