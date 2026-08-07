@@ -13,7 +13,12 @@ from cryptography.fernet import Fernet
 from bot.crypto import TokenCipher
 from bot.oauth_server import create_oauth_app
 from bot.storage import Database, utc_now
-from bot.threads_oauth import OAuthToken, ThreadsAuthService, ThreadsProfile
+from bot.threads_oauth import (
+    REVIEW_OAUTH_PURPOSE,
+    OAuthToken,
+    ThreadsAuthService,
+    ThreadsProfile,
+)
 
 
 class FakeOAuthClient:
@@ -68,6 +73,7 @@ async def test_callback_succeeds_notifies_and_rejects_replay(tmp_path):
     auth_url = await auth.create_authorization_url(
         telegram_user_id=77,
         target_chat_id=-100123,
+        language="ru",
     )
     state = parse_qs(urlparse(auth_url).query)["state"][0]
     transport = httpx.ASGITransport(app=app)
@@ -88,6 +94,34 @@ async def test_callback_succeeds_notifies_and_rejects_replay(tmp_path):
     bot.send_message.assert_awaited_once()
     assert bot.send_message.await_args.args[0] == 77
     assert await database.get_active_threads_account() is not None
+    assert (await database.get_chat_settings(-100123))["language"] == "ru"
+
+
+@pytest.mark.asyncio
+async def test_review_callback_keeps_token_isolated_and_notifies_in_english(tmp_path):
+    database, _, auth, bot, app = build_app(tmp_path)
+    await database.upsert_reviewer_access_grant(
+        telegram_user_id=88,
+        expires_at=utc_now() + timedelta(days=30),
+    )
+    auth_url = await auth.create_authorization_url(
+        telegram_user_id=88,
+        target_chat_id=88,
+        purpose=REVIEW_OAUTH_PURPOSE,
+    )
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
+        response = await client.get(
+            "/oauth/threads/callback",
+            params={"state": state, "code": "valid-code"},
+        )
+
+    assert response.status_code == 200
+    assert "Threads connected" in response.text
+    assert await database.get_active_threads_account() is None
+    assert await database.get_review_threads_account(88) is not None
+    assert "Meta App Review" in bot.send_message.await_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -96,6 +130,7 @@ async def test_callback_denial_consumes_state_without_creating_account(tmp_path)
     auth_url = await auth.create_authorization_url(
         telegram_user_id=77,
         target_chat_id=-100123,
+        language="ru",
     )
     state = parse_qs(urlparse(auth_url).query)["state"][0]
     transport = httpx.ASGITransport(app=app)
@@ -174,3 +209,35 @@ async def test_deauthorize_is_idempotent_for_valid_signed_request(tmp_path):
         )
     assert response.status_code == 200
     assert response.json() == {"success": True}
+
+
+@pytest.mark.asyncio
+async def test_deauthorize_deletes_matching_review_token_and_grant(tmp_path):
+    database, cipher, _, _, app = build_app(tmp_path)
+    await database.upsert_reviewer_access_grant(
+        telegram_user_id=88,
+        expires_at=utc_now() + timedelta(days=30),
+    )
+    await database.upsert_review_threads_connection(
+        telegram_user_id=88,
+        threads_user_id="review-user",
+        username="reviewer",
+        access_token_encrypted=cipher.encrypt("review-token"),
+        token_type="bearer",
+        expires_at=utc_now() + timedelta(days=60),
+    )
+    valid = signed_request(
+        {"algorithm": "HMAC-SHA256", "user_id": "review-user"},
+        "app-secret",
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
+        response = await client.post(
+            "/oauth/threads/deauthorize",
+            content=urlencode({"signed_request": valid}),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+
+    assert response.status_code == 200
+    assert await database.get_review_threads_account(88) is None
+    assert not await database.has_active_reviewer_access(88)

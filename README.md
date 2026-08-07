@@ -10,6 +10,8 @@ Telegram bot for searching and monitoring Threads posts through Meta's official 
 - Private-chat `/connect_threads` OAuth flow with a random, one-time state
 - Encrypted long-lived token storage in SQLite and automatic pre-expiry refresh
 - Meta deauthorization and data-deletion callbacks with `signed_request` verification
+- Time-limited, command-scoped Meta reviewer access with isolated encrypted tokens
+- Automatic Russian/English UI and Telegram command descriptions based on the user's Telegram app language
 - Duplicate-notification prevention and configurable polling interval
 
 ## Threads permissions
@@ -77,6 +79,8 @@ Store the output in `THREADS_TOKEN_ENCRYPTION_KEY` and back it up securely. Repl
 | `THREADS_TOKEN_ENCRYPTION_KEY` | Fernet key for token encryption at rest |
 | `PUBLIC_BASE_URL` | `https://threads-auth.adigitalnyc.com` |
 | `THREADS_REDIRECT_URI` | `https://threads-auth.adigitalnyc.com/oauth/threads/callback` |
+| `THREADS_REVIEW_ACCESS_CODE_HASH` | SHA-256 of the temporary Meta reviewer code; empty disables new review access |
+| `THREADS_REVIEW_ACCESS_EXPIRES_AT` | Required UTC expiry for the review campaign, for example `2026-09-06T18:00:00+00:00` |
 
 All optional/defaulted variables are documented in [.env.example](.env.example).
 
@@ -103,6 +107,13 @@ python scripts/search_cli.py "keyword" --limit 3
 
 ## Bot commands
 
+The bot reads Telegram's `language_code` on every incoming command. Codes `ru`
+and `ru-*` receive Russian text; every other code, including a missing value,
+receives English. This applies to help, validation/errors, status, search
+results, OAuth notifications/pages, and the localized Telegram command menu.
+The language used for proactive watcher notifications is stored for the target
+chat when an administrator connects Threads or uses a monitoring command there.
+
 - `/connect_threads` — create an OAuth button; OAuth administrator, private chat only
 - `/threads_status` — show connected account, bound chat, and token expiry; OAuth administrator, private chat only
 - `/disconnect_threads` — disable the account and erase its stored ciphertext; OAuth administrator, private chat only
@@ -119,6 +130,12 @@ python scripts/search_cli.py "keyword" --limit 3
 - `/status` — show operational status
 
 Only an active Threads chat binding is eligible for watcher notifications. Connecting the account creates/enables the primary binding without overriding a later explicit `/monitor off` choice.
+
+The production phrase pool, poll interval, seen-post set, and notification state
+are shared by the single internal bot workspace. They are not duplicated per
+Telegram user or Threads token. Temporary Meta reviewer accounts are the only
+exception: their access grants and encrypted Threads tokens are isolated and
+are never used by the watcher or the production phrase pool.
 
 ## Public endpoints
 
@@ -149,6 +166,33 @@ Before submitting, add the agent Threads account as an app/test user and accept 
 6. `/disconnect_threads`, followed by a disconnected status.
 
 The review instructions must provide Meta a working test path (including Telegram access/allowlisting when required) and explain that public third-party post search is the capability requested by `threads_keyword_search`; development-mode validation uses the authorized test account's own posts.
+
+### Temporary reviewer access
+
+Generate a high-entropy deep link shortly before submission:
+
+```bash
+.venv/bin/python scripts/generate_review_access.py \
+  --bot-username alsmm_threads_monitor_bot --days 30
+```
+
+Put only the generated `THREADS_REVIEW_ACCESS_CODE_HASH` and
+`THREADS_REVIEW_ACCESS_EXPIRES_AT` values in the server `.env`, then restart the
+bot. Put the generated `https://t.me/...` link in Meta's reviewer instructions;
+do not put the raw code in `.env` or source control.
+
+The deep link learns the reviewer's Telegram ID when they press Start and grants
+access until the configured expiry. Review mode permits only `/connect_threads`,
+`/threads_status`, `/search`, `/disconnect_threads`, `/help`, and `/start`.
+Reviewer OAuth tokens are encrypted in a separate table and keyed by reviewer
+Telegram ID. They cannot replace or delete the production Threads account, edit
+the phrase pool, change monitoring, or alter the polling interval. Expired grant
+cleanup deletes its isolated token through a database cascade.
+
+After review, empty both review environment variables and restart the bot. This
+immediately disables review access even if a grant row has not yet reached its
+stored expiry. Do not give Meta personal Threads credentials: their reviewer
+uses their own Meta test account through `/connect_threads`.
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the VPS, reverse-proxy, Meta dashboard, and manual verification checklist.
 

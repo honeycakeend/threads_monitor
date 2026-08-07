@@ -14,13 +14,45 @@ from urllib.parse import urlencode
 import httpx
 
 from bot.crypto import TokenCipher
+from bot.i18n import Language
 from bot.storage import Database, from_db_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 
 THREADS_SCOPES = ("threads_basic", "threads_keyword_search")
+PRIMARY_OAUTH_PURPOSE = "primary"
+REVIEW_OAUTH_PURPOSE = "review"
+
+
 class ThreadsOAuthError(RuntimeError):
     """A safe-to-display Threads OAuth error without credential material."""
+
+
+class MetaOAuthRequestError(ThreadsOAuthError):
+    """A structured Meta error containing only safe numeric diagnostics."""
+
+    def __init__(
+        self,
+        *,
+        path: str,
+        status_code: int,
+        code: int | None,
+        error_subcode: int | None,
+    ) -> None:
+        self.path = path
+        self.status_code = status_code
+        self.code = code
+        self.error_subcode = error_subcode
+        numeric_details = [
+            f"{name}={value}"
+            for name, value in (("code", code), ("error_subcode", error_subcode))
+            if value is not None
+        ]
+        details = f"; {'; '.join(numeric_details)}" if numeric_details else ""
+        super().__init__(
+            f"Meta rejected the OAuth request at {path} "
+            f"(HTTP {status_code}{details})"
+        )
 
 
 class InvalidOAuthStateError(ThreadsOAuthError):
@@ -56,6 +88,8 @@ class CompletedAuthorization:
     threads_user_id: str
     username: str | None
     expires_at: datetime
+    purpose: str = PRIMARY_OAUTH_PURPOSE
+    language: Language = "en"
 
 
 class ThreadsOAuthClient:
@@ -95,15 +129,36 @@ class ThreadsOAuthClient:
         )
 
     async def exchange_long_lived_token(self, short_lived_token: str) -> OAuthToken:
-        response = await self._request(
-            "GET",
-            "/access_token",
-            params={
-                "grant_type": "th_exchange_token",
-                "client_secret": self._app_secret,
-            },
-            headers={"Authorization": f"Bearer {short_lived_token}"},
-        )
+        try:
+            response = await self._request(
+                "GET",
+                "/access_token",
+                params={
+                    "grant_type": "th_exchange_token",
+                    "client_secret": self._app_secret,
+                },
+                headers={"Authorization": f"Bearer {short_lived_token}"},
+            )
+        except MetaOAuthRequestError as exc:
+            # Meta's current Postman collection uses OAuth bearer auth, while
+            # deployments can still require the historically documented
+            # access_token parameter. Retry only for that observed transport
+            # rejection so ordinary failures never produce duplicate calls.
+            if (exc.code, exc.error_subcode) != (452, 4_279_019):
+                raise
+            logger.info(
+                "Retrying Threads long-lived token exchange with the "
+                "access_token parameter"
+            )
+            response = await self._request(
+                "GET",
+                "/access_token",
+                params={
+                    "grant_type": "th_exchange_token",
+                    "client_secret": self._app_secret,
+                    "access_token": short_lived_token,
+                },
+            )
         return self._parse_long_lived_token(response)
 
     async def refresh_long_lived_token(self, access_token: str) -> OAuthToken:
@@ -150,7 +205,13 @@ class ThreadsOAuthClient:
             # endpoints put credentials there, so suppress the original exception.
             raise ThreadsOAuthError("Could not reach the Meta OAuth service") from None
         if response.status_code >= 400:
-            raise ThreadsOAuthError(self._safe_error_message(response))
+            code, error_subcode = self._numeric_meta_error_details(response)
+            raise MetaOAuthRequestError(
+                path=path,
+                status_code=response.status_code,
+                code=code,
+                error_subcode=error_subcode,
+            )
         return response
 
     def _parse_long_lived_token(self, response: httpx.Response) -> OAuthToken:
@@ -191,10 +252,29 @@ class ThreadsOAuthClient:
         return str(value)
 
     @staticmethod
-    def _safe_error_message(response: httpx.Response) -> str:
+    def _numeric_meta_error_details(
+        response: httpx.Response,
+    ) -> tuple[int | None, int | None]:
         # Provider error text is deliberately not reflected: some providers echo
         # submitted parameters, which could turn an OAuth code into log content.
-        return f"Meta rejected the OAuth request (HTTP {response.status_code})"
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict) or not isinstance(payload.get("error"), dict):
+            return None, None
+
+        error = payload["error"]
+
+        def numeric_value(key: str) -> int | None:
+            value = error.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isascii() and value.isdigit():
+                return int(value)
+            return None
+
+        return numeric_value("code"), numeric_value("error_subcode")
 
 
 class ThreadsAuthService:
@@ -222,12 +302,18 @@ class ThreadsAuthService:
         *,
         telegram_user_id: int,
         target_chat_id: int,
+        purpose: str = PRIMARY_OAUTH_PURPOSE,
+        language: Language = "en",
     ) -> str:
+        if purpose not in {PRIMARY_OAUTH_PURPOSE, REVIEW_OAUTH_PURPOSE}:
+            raise ThreadsOAuthError("Unsupported OAuth authorization purpose")
         raw_state = secrets.token_urlsafe(32)
         await self._db.create_oauth_state(
             state_hash=self.hash_state(raw_state),
             telegram_user_id=telegram_user_id,
             target_chat_id=target_chat_id,
+            purpose=purpose,
+            language=language,
             expires_at=utc_now() + self._state_ttl,
         )
         query = urlencode(
@@ -265,21 +351,48 @@ class ThreadsAuthService:
             raise ThreadsOAuthError("Threads account identity changed during OAuth")
 
         expires_at = utc_now() + timedelta(seconds=long_lived.expires_in)
-        await self._db.upsert_threads_connection(
-            threads_user_id=profile.id,
-            username=profile.username,
-            access_token_encrypted=self._cipher.encrypt(long_lived.access_token),
-            token_type=long_lived.token_type,
-            expires_at=expires_at,
-            connected_by_telegram_user_id=int(state["telegram_user_id"]),
-            target_chat_id=int(state["target_chat_id"]),
-        )
+        telegram_user_id = int(state["telegram_user_id"])
+        purpose = str(state.get("purpose") or PRIMARY_OAUTH_PURPOSE)
+        language: Language = "ru" if state.get("language") == "ru" else "en"
+        encrypted_token = self._cipher.encrypt(long_lived.access_token)
+        if purpose == REVIEW_OAUTH_PURPOSE:
+            try:
+                await self._db.upsert_review_threads_connection(
+                    telegram_user_id=telegram_user_id,
+                    threads_user_id=profile.id,
+                    username=profile.username,
+                    access_token_encrypted=encrypted_token,
+                    token_type=long_lived.token_type,
+                    expires_at=expires_at,
+                )
+            except ValueError as exc:
+                raise ThreadsOAuthError(
+                    "Temporary reviewer access expired during OAuth"
+                ) from exc
+        elif purpose == PRIMARY_OAUTH_PURPOSE:
+            await self._db.upsert_threads_connection(
+                threads_user_id=profile.id,
+                username=profile.username,
+                access_token_encrypted=encrypted_token,
+                token_type=long_lived.token_type,
+                expires_at=expires_at,
+                connected_by_telegram_user_id=telegram_user_id,
+                target_chat_id=int(state["target_chat_id"]),
+            )
+            await self._db.set_chat_language(
+                int(state["target_chat_id"]),
+                language,
+            )
+        else:
+            raise ThreadsOAuthError("OAuth state has an unsupported purpose")
         return CompletedAuthorization(
-            telegram_user_id=int(state["telegram_user_id"]),
+            telegram_user_id=telegram_user_id,
             target_chat_id=int(state["target_chat_id"]),
             threads_user_id=profile.id,
             username=profile.username,
             expires_at=expires_at,
+            purpose=purpose,
+            language=language,
         )
 
     async def consume_state(self, raw_state: str) -> dict:
@@ -300,6 +413,35 @@ class ThreadsAuthService:
 
     async def disconnect(self) -> bool:
         return await self._db.disconnect_active_threads_account()
+
+    async def review_status(self, telegram_user_id: int) -> dict | None:
+        account = await self._db.get_review_threads_account(telegram_user_id)
+        if account is None:
+            return None
+        account["expires_at"] = from_db_timestamp(account.get("expires_at"))
+        account.pop("access_token_encrypted", None)
+        return account
+
+    async def get_review_access_token(self, telegram_user_id: int) -> str:
+        account = await self._db.get_review_threads_account(telegram_user_id)
+        if account is None:
+            raise ThreadsNotConnectedError(
+                "Review Threads account is not connected"
+            )
+        expires_at = from_db_timestamp(account.get("expires_at"))
+        if expires_at is None or expires_at <= utc_now():
+            raise ThreadsNotConnectedError(
+                "Review Threads access token expired; reconnect the account"
+            )
+        encrypted = account.get("access_token_encrypted")
+        if encrypted is None:
+            raise ThreadsNotConnectedError(
+                "Review Threads account has no stored credential"
+            )
+        return self._cipher.decrypt(bytes(encrypted))
+
+    async def disconnect_review(self, telegram_user_id: int) -> bool:
+        return await self._db.disconnect_review_threads_account(telegram_user_id)
 
     @staticmethod
     def hash_state(raw_state: str) -> str:

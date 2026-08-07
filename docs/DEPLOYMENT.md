@@ -62,6 +62,9 @@ THREADS_REDIRECT_URI=https://threads-auth.adigitalnyc.com/oauth/threads/callback
 OAUTH_SERVER_HOST=127.0.0.1
 OAUTH_SERVER_PORT=8080
 DATABASE_PATH=./data/bot.db
+# Leave disabled except during an active Meta review window.
+THREADS_REVIEW_ACCESS_CODE_HASH=
+THREADS_REVIEW_ACCESS_EXPIRES_AT=
 ```
 
 `THREADS_APP_ID` and `THREADS_APP_SECRET` must be the Threads credentials shown inside the Meta "Access the Threads API" use case. Do not substitute an ID/secret belonging to a different Meta product.
@@ -137,19 +140,20 @@ The Meta **Data Deletion Request URL** is the HTTPS POST callback on `threads-au
 
 ## 7. Manual end-to-end verification
 
-1. In the primary internal Telegram chat, send `/start` or `/monitor on` and verify the bot can post there.
-2. In a private chat, have an ID listed in `THREADS_OAUTH_ADMIN_USER_IDS` send `/connect_threads`.
-3. Verify the bot returns an HTTPS button and no token/code is visible in Telegram.
-4. Open the button while signed into the designated Threads test account. Confirm the consent screen requests only `threads_basic` and `threads_keyword_search`.
-5. Complete consent. Verify the browser shows the minimal success page and Telegram receives the account/chat confirmation.
-6. Send `/threads_status`. Verify username, Threads user ID, primary chat ID, and expiry are shown, but no token is shown.
-7. Create a distinctive post on the authorized test account. Run `/search <distinctive phrase>` and verify the result.
-8. Add another distinctive phrase with `/add`, run `/run` once to initialize, then create a matching post and run `/run` again. Verify one notification reaches only the bound primary chat and is not duplicated on another run.
-9. Verify `/connect_threads` fails in a group and for a Telegram user outside the OAuth-admin allowlist.
-10. Verify reusing the completed callback URL returns an expired/already-used state page.
-11. Use Meta's dashboard/test facility to send a deauthorize callback. Verify `/threads_status` becomes disconnected and search no longer runs.
-12. Reconnect, then use Meta's data-deletion callback test. Verify the JSON response contains `url` and `confirmation_code`, the returned status URL displays completion, and the account credential/binding is removed.
-13. Reconnect again if the service must remain operational after destructive callback testing.
+1. Set Telegram to Russian, send `/help`, and verify Russian help and command-menu descriptions. Switch Telegram to any non-Russian language, send `/help` again, and verify English. A missing language code also falls back to English.
+2. In the primary internal Telegram chat, send `/start` or `/monitor on` and verify the bot can post there in the language last stored for that chat.
+3. In a private chat, have an ID listed in `THREADS_OAUTH_ADMIN_USER_IDS` send `/connect_threads`.
+4. Verify the bot returns an HTTPS button and no token/code is visible in Telegram.
+5. Open the button while signed into the designated Threads test account. Confirm the consent screen requests only `threads_basic` and `threads_keyword_search`.
+6. Complete consent. Verify the browser success page and Telegram confirmation use the initiating user's language.
+7. Send `/threads_status`. Verify username, Threads user ID, primary chat ID, and expiry are shown, but no token is shown.
+8. Create a distinctive post on the authorized test account. Run `/search <distinctive phrase>` and verify the localized result.
+9. Add another distinctive phrase with `/add`, run `/run` once to initialize, then create a matching post and run `/run` again. Verify one localized notification reaches only the bound primary chat and is not duplicated on another run.
+10. Verify `/connect_threads` fails in a group and for a Telegram user outside the OAuth-admin allowlist.
+11. Verify reusing the completed callback URL returns an expired/already-used state page.
+12. Use Meta's dashboard/test facility to send a deauthorize callback. Verify `/threads_status` becomes disconnected and search no longer runs.
+13. Reconnect, then use Meta's data-deletion callback test. Verify the JSON response contains `url` and `confirmation_code`, the returned status URL displays completion, and the account credential/binding is removed.
+14. Reconnect again if the service must remain operational after destructive callback testing.
 
 ## 8. App Review evidence
 
@@ -163,7 +167,42 @@ Prepare a concise reviewer description and screencast covering:
 - Why `threads_keyword_search` is required for public third-party post discovery after approval
 - `/disconnect_threads` and the user-data deletion path
 
-Give reviewers a usable test route. If Telegram access is allowlisted, add the supplied reviewer Telegram ID for the review window or provide equivalent precise access instructions. Do not give reviewers production secrets.
+Give reviewers a usable test route without asking for a Telegram ID in advance.
+Generate a temporary review deep link on the server:
+
+```bash
+sudo -u threadsbot /opt/threads_bot/.venv/bin/python \
+  /opt/threads_bot/scripts/generate_review_access.py \
+  --bot-username alsmm_threads_monitor_bot --days 30
+```
+
+Copy only the generated hash and UTC expiry to `/opt/threads_bot/.env`, restart
+the service, and put the generated `https://t.me/...` link in the private App
+Review instructions. Keep that link out of public documentation and source
+control.
+
+The reviewer presses Start, then follows this isolated flow:
+
+1. `/connect_threads` and OAuth using Meta's own reviewer test account.
+2. `/threads_status` to confirm the connection without exposing a credential.
+3. `/search ThreadsAPI` and `/search top ThreadsAPI` to exercise
+   `threads_keyword_search` with the reviewer's token.
+4. `/disconnect_threads` to delete only the reviewer's encrypted token.
+
+The reviewer cannot access `/add`, `/remove`, `/pool`, `/monitor`, `/interval`,
+`/run`, production OAuth status, the production account, or the primary chat.
+Each reviewer token is encrypted and stored separately by Telegram user ID.
+Meta's deauthorize/data-deletion callbacks remove matching review records too.
+
+After review, empty `THREADS_REVIEW_ACCESS_CODE_HASH` and
+`THREADS_REVIEW_ACCESS_EXPIRES_AT`, restart the bot, and verify the review link
+no longer grants access. Do not give reviewers production secrets or personal
+Meta credentials.
+
+Within 30 days before submission, make at least one successful `/me` call via
+OAuth for `threads_basic` and one successful `/keyword_search` call for
+`threads_keyword_search`; Meta requires a recent successful call for every
+permission requesting Advanced Access.
 
 Suggested permission explanations:
 

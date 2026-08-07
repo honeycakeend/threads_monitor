@@ -49,6 +49,7 @@ async def test_state_is_hashed_bound_and_one_time(tmp_path):
     url = await service.create_authorization_url(
         telegram_user_id=101,
         target_chat_id=-100999,
+        language="ru",
     )
     query = parse_qs(urlparse(url).query)
     raw_state = query["state"][0]
@@ -60,15 +61,17 @@ async def test_state_is_hashed_bound_and_one_time(tmp_path):
 
     async with aiosqlite.connect(tmp_path / "bot.db") as db:
         row = await (await db.execute(
-            "SELECT state_hash, telegram_user_id, target_chat_id FROM threads_oauth_states"
+            "SELECT state_hash, telegram_user_id, target_chat_id, language "
+            "FROM threads_oauth_states"
         )).fetchone()
     assert row is not None
     assert row[0] == service.hash_state(raw_state)
     assert raw_state not in row[0]
-    assert row[1:] == (101, -100999)
+    assert row[1:] == (101, -100999, "ru")
 
     consumed = await service.consume_state(raw_state)
     assert consumed["telegram_user_id"] == 101
+    assert consumed["language"] == "ru"
     with pytest.raises(InvalidOAuthStateError):
         await service.consume_state(raw_state)
 

@@ -1,6 +1,7 @@
 from html import escape
 
 from bot.config import SearchMode, SearchType
+from bot.i18n import Language, choose
 from bot.models import SearchResult, ThreadPost
 from bot.threads_client import ThreadsClient
 from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
@@ -57,7 +58,12 @@ class SearchService:
         )
 
 
-def format_post(post: ThreadPost, index: int) -> str:
+def format_post(
+    post: ThreadPost,
+    index: int,
+    *,
+    language: Language = "en",
+) -> str:
     text = (post.text or "").strip()
     if len(text) > 400:
         text = text[:397] + "..."
@@ -75,40 +81,61 @@ def format_post(post: ThreadPost, index: int) -> str:
 
     flags = []
     if post.has_replies:
-        flags.append("replies")
+        flags.append(choose(language, ru="есть ответы", en="replies"))
     if post.is_reply:
-        flags.append("reply")
+        flags.append(choose(language, ru="ответ", en="reply"))
     if post.is_quote_post:
-        flags.append("quote")
+        flags.append(choose(language, ru="цитата", en="quote"))
 
     if flags:
         lines.append(f"🏷 {', '.join(flags)}")
 
     if post.permalink:
         lines.append(
-            f'🔗 <a href="{escape(str(post.permalink))}">Открыть в Threads</a>'
+            f'🔗 <a href="{escape(str(post.permalink))}">'
+            + choose(language, ru="Открыть в Threads", en="Open in Threads")
+            + "</a>"
         )
 
     return "\n".join(lines)
 
 
-def format_search_result(result: SearchResult, *, max_posts: int = 10) -> list[str]:
+def format_search_result(
+    result: SearchResult,
+    *,
+    max_posts: int = 10,
+    language: Language = "en",
+) -> list[str]:
     if not result.posts:
-        return [f'По запросу «{escape(result.query)}» ничего не найдено.']
+        return [
+            choose(
+                language,
+                ru=f'По запросу «{escape(result.query)}» ничего не найдено.',
+                en=f'No results found for “{escape(result.query)}”.',
+            )
+        ]
 
-    header = (
-        f'🔍 Запрос: <b>{escape(result.query)}</b>\n'
-        f"Найдено: {result.total}"
+    header = choose(
+        language,
+        ru=f'🔍 Запрос: <b>{escape(result.query)}</b>\nНайдено: {result.total}',
+        en=f'🔍 Query: <b>{escape(result.query)}</b>\nFound: {result.total}',
     )
     messages = [header]
 
     chunk = ""
     for index, post in enumerate(result.posts, start=1):
         if index > max_posts:
-            messages.append(f"... и ещё {result.total - max_posts} пост(ов)")
+            remaining = result.total - max_posts
+            messages.append(
+                choose(
+                    language,
+                    ru=f"... и ещё {remaining} пост(ов)",
+                    en=f"... and {remaining} more post(s)",
+                )
+            )
             break
 
-        block = format_post(post, index) + "\n\n"
+        block = format_post(post, index, language=language) + "\n\n"
         if len(chunk) + len(block) > 3500:
             messages.append(chunk.rstrip())
             chunk = block

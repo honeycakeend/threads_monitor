@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -53,6 +54,15 @@ class Settings(BaseSettings):
     threads_oauth_state_ttl_minutes: int = Field(default=10, ge=5, le=60)
     threads_token_refresh_before_days: int = Field(default=7, ge=2, le=30)
     threads_token_refresh_check_hours: int = Field(default=6, ge=1, le=24)
+
+    threads_review_access_code_hash: str = Field(
+        default="",
+        validation_alias="THREADS_REVIEW_ACCESS_CODE_HASH",
+    )
+    threads_review_access_expires_at: datetime | None = Field(
+        default=None,
+        validation_alias="THREADS_REVIEW_ACCESS_EXPIRES_AT",
+    )
 
     oauth_server_host: str = "127.0.0.1"
     oauth_server_port: int = Field(default=8080, ge=1, le=65535)
