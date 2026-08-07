@@ -5,6 +5,7 @@ from html import escape
 from aiogram import Bot
 
 from bot.config import SearchType
+from bot.i18n import choose, language_from_code
 from bot.models import ThreadPost
 from bot.search_service import SearchService, format_post
 from bot.storage import Database
@@ -156,10 +157,15 @@ class SearchWatcher:
         return sent
 
     async def _send_post(self, chat_id: int, phrase_text: str, post: ThreadPost) -> None:
-        body = format_post(post, index=1)
-        message = (
-            f'🔔 <b>Новый пост</b> по фразе «{escape(phrase_text)}»\n\n{body}'
+        chat = await self._db.get_chat_settings(chat_id)
+        language = language_from_code(chat.get("language"))
+        body = format_post(post, index=1, language=language)
+        heading = choose(
+            language,
+            ru=f'🔔 <b>Новый пост</b> по фразе «{escape(phrase_text)}»',
+            en=f'🔔 <b>New post</b> for “{escape(phrase_text)}”',
         )
+        message = f"{heading}\n\n{body}"
         await self._bot.send_message(
             chat_id,
             message,

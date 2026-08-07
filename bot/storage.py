@@ -1,3 +1,4 @@
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from pathlib import Path
 import aiosqlite
 
 from bot.config import SearchType, settings
+from bot.i18n import Language, choose
 
 THREADS_KEYWORD_SEARCH_DAILY_LIMIT = 2200
 MIN_POLL_INTERVAL_MINUTES = 5
@@ -26,7 +28,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_phrases_phrase
 
 CREATE TABLE IF NOT EXISTS chat_settings (
     chat_id INTEGER PRIMARY KEY,
-    monitoring_enabled INTEGER NOT NULL DEFAULT 1
+    monitoring_enabled INTEGER NOT NULL DEFAULT 1,
+    language TEXT NOT NULL DEFAULT 'en'
 );
 
 CREATE TABLE IF NOT EXISTS seen_posts (
@@ -53,6 +56,8 @@ CREATE TABLE IF NOT EXISTS threads_oauth_states (
     state_hash TEXT PRIMARY KEY,
     telegram_user_id INTEGER NOT NULL,
     target_chat_id INTEGER NOT NULL,
+    purpose TEXT NOT NULL DEFAULT 'primary',
+    language TEXT NOT NULL DEFAULT 'en',
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
     created_at TEXT NOT NULL
@@ -92,6 +97,29 @@ CREATE TABLE IF NOT EXISTS threads_chat_bindings (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_threads_binding_primary_per_account
     ON threads_chat_bindings(account_id)
     WHERE is_primary = 1 AND active = 1;
+
+CREATE TABLE IF NOT EXISTS reviewer_access_grants (
+    telegram_user_id INTEGER PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS threads_review_accounts (
+    telegram_user_id INTEGER PRIMARY KEY,
+    threads_user_id TEXT NOT NULL,
+    username TEXT,
+    access_token_encrypted BLOB NOT NULL,
+    token_type TEXT NOT NULL DEFAULT 'bearer',
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (telegram_user_id)
+        REFERENCES reviewer_access_grants(telegram_user_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_review_accounts_threads_user
+    ON threads_review_accounts(threads_user_id);
 
 CREATE TABLE IF NOT EXISTS threads_data_deletion_requests (
     confirmation_code TEXT PRIMARY KEY,
@@ -136,17 +164,48 @@ def estimate_daily_requests(phrase_count: int, interval_minutes: int) -> int:
     return int(phrase_count * cycles_per_day)
 
 
-def format_interval_advice(phrase_count: int, interval_minutes: int) -> str:
+def format_interval_advice(
+    phrase_count: int,
+    interval_minutes: int,
+    *,
+    language: Language = "en",
+) -> str:
     daily = estimate_daily_requests(phrase_count, interval_minutes)
-    lines = [
-        f"Интервал: <b>{interval_minutes} мин</b>",
-        f"Фраз в пуле: <b>{phrase_count}</b>",
-        f"≈ <b>{daily}</b> запросов/сутки (лимит Meta: {THREADS_KEYWORD_SEARCH_DAILY_LIMIT})",
-    ]
+    lines = (
+        [
+            f"Интервал: <b>{interval_minutes} мин</b>",
+            f"Фраз в пуле: <b>{phrase_count}</b>",
+            (
+                f"≈ <b>{daily}</b> запросов/сутки "
+                f"(лимит Meta: {THREADS_KEYWORD_SEARCH_DAILY_LIMIT})"
+            ),
+        ]
+        if language == "ru"
+        else [
+            f"Interval: <b>{interval_minutes} min</b>",
+            f"Phrases in pool: <b>{phrase_count}</b>",
+            (
+                f"≈ <b>{daily}</b> requests/day "
+                f"(Meta limit: {THREADS_KEYWORD_SEARCH_DAILY_LIMIT})"
+            ),
+        ]
+    )
     if daily > THREADS_KEYWORD_SEARCH_DAILY_LIMIT:
-        lines.append("⚠️ Превышает лимит — увеличьте интервал или уменьшите число фраз.")
+        lines.append(
+            choose(
+                language,
+                ru="⚠️ Превышает лимит — увеличьте интервал или уменьшите число фраз.",
+                en="⚠️ Above the limit — increase the interval or reduce the pool.",
+            )
+        )
     elif daily > THREADS_KEYWORD_SEARCH_DAILY_LIMIT * 0.8:
-        lines.append("⚠️ Близко к лимиту — запас небольшой.")
+        lines.append(
+            choose(
+                language,
+                ru="⚠️ Близко к лимиту — запас небольшой.",
+                en="⚠️ Close to the limit — little capacity remains.",
+            )
+        )
     return "\n".join(lines)
 
 
@@ -174,19 +233,19 @@ class Database:
         cursor = await db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='search_queries'"
         )
-        if await cursor.fetchone() is None:
-            return
-
-        await db.execute(
-            """
-            INSERT OR IGNORE INTO phrases (phrase, search_type, active, initialized, created_at)
-            SELECT query, search_type, active, COALESCE(initialized, 0), created_at
-            FROM search_queries
-            WHERE active = 1
-            """
-        )
-        await db.execute("DROP TABLE IF EXISTS search_queries")
-        await db.execute("DELETE FROM seen_posts")
+        if await cursor.fetchone() is not None:
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO phrases (
+                    phrase, search_type, active, initialized, created_at
+                )
+                SELECT query, search_type, active, COALESCE(initialized, 0), created_at
+                FROM search_queries
+                WHERE active = 1
+                """
+            )
+            await db.execute("DROP TABLE IF EXISTS search_queries")
+            await db.execute("DELETE FROM seen_posts")
 
         cursor = await db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='bot_settings'"
@@ -200,6 +259,48 @@ class Database:
                 )
                 """
             )
+
+        cursor = await db.execute("PRAGMA table_info(threads_oauth_states)")
+        columns = {str(row[1]) for row in await cursor.fetchall()}
+        if "purpose" not in columns:
+            try:
+                await db.execute(
+                    """
+                    ALTER TABLE threads_oauth_states
+                    ADD COLUMN purpose TEXT NOT NULL DEFAULT 'primary'
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                # Multiple startup workers can observe the pre-migration schema
+                # concurrently. SQLite has no ADD COLUMN IF NOT EXISTS, so the
+                # worker that loses the race treats only this exact result as done.
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "language" not in columns:
+            try:
+                await db.execute(
+                    """
+                    ALTER TABLE threads_oauth_states
+                    ADD COLUMN language TEXT NOT NULL DEFAULT 'en'
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+        cursor = await db.execute("PRAGMA table_info(chat_settings)")
+        chat_columns = {str(row[1]) for row in await cursor.fetchall()}
+        if "language" not in chat_columns:
+            try:
+                await db.execute(
+                    """
+                    ALTER TABLE chat_settings
+                    ADD COLUMN language TEXT NOT NULL DEFAULT 'en'
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     async def get_poll_interval_minutes(self) -> int:
         async with self.connection() as db:
@@ -227,7 +328,7 @@ class Database:
         async with self.connection() as db:
             cursor = await db.execute(
                 """
-                SELECT chat_id, monitoring_enabled
+                SELECT chat_id, monitoring_enabled, language
                 FROM chat_settings
                 WHERE chat_id = ?
                 """,
@@ -235,11 +336,28 @@ class Database:
             )
             row = await cursor.fetchone()
             if row is None:
-                return {"chat_id": chat_id, "monitoring_enabled": False}
+                return {
+                    "chat_id": chat_id,
+                    "monitoring_enabled": False,
+                    "language": "en",
+                }
             return {
                 "chat_id": chat_id,
                 "monitoring_enabled": bool(row["monitoring_enabled"]),
+                "language": str(row["language"]),
             }
+
+    async def set_chat_language(self, chat_id: int, language: Language) -> None:
+        async with self.connection() as db:
+            await db.execute(
+                """
+                INSERT INTO chat_settings (chat_id, monitoring_enabled, language)
+                VALUES (?, 0, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET language = excluded.language
+                """,
+                (chat_id, language),
+            )
+            await db.commit()
 
     async def set_monitoring(self, chat_id: int, enabled: bool) -> None:
         async with self.connection() as db:
@@ -435,6 +553,8 @@ class Database:
         state_hash: str,
         telegram_user_id: int,
         target_chat_id: int,
+        purpose: str = "primary",
+        language: Language = "en",
         expires_at: datetime,
     ) -> None:
         now = to_db_timestamp(utc_now())
@@ -450,14 +570,16 @@ class Database:
             await db.execute(
                 """
                 INSERT INTO threads_oauth_states (
-                    state_hash, telegram_user_id, target_chat_id,
+                    state_hash, telegram_user_id, target_chat_id, purpose, language,
                     expires_at, created_at
-                ) VALUES (?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     state_hash,
                     telegram_user_id,
                     target_chat_id,
+                    purpose,
+                    language,
                     to_db_timestamp(expires_at),
                     now,
                 ),
@@ -482,13 +604,131 @@ class Database:
                 WHERE state_hash = ?
                   AND consumed_at IS NULL
                   AND expires_at > ?
-                RETURNING telegram_user_id, target_chat_id, expires_at, created_at
+                RETURNING telegram_user_id, target_chat_id, purpose, language,
+                          expires_at, created_at
                 """,
                 (now, state_hash, now),
             )
             row = await cursor.fetchone()
             await db.commit()
             return dict(row) if row else None
+
+    async def upsert_reviewer_access_grant(
+        self,
+        *,
+        telegram_user_id: int,
+        expires_at: datetime,
+    ) -> None:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute(
+                """
+                INSERT INTO reviewer_access_grants (
+                    telegram_user_id, expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(telegram_user_id) DO UPDATE SET
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                (telegram_user_id, to_db_timestamp(expires_at), now, now),
+            )
+            await db.commit()
+
+    async def has_active_reviewer_access(self, telegram_user_id: int) -> bool:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            # Expired grants are credentials too. Removing them also erases the
+            # review-only token through the foreign-key cascade.
+            await db.execute(
+                "DELETE FROM reviewer_access_grants WHERE expires_at <= ?",
+                (now,),
+            )
+            cursor = await db.execute(
+                """
+                SELECT 1
+                FROM reviewer_access_grants
+                WHERE telegram_user_id = ? AND expires_at > ?
+                """,
+                (telegram_user_id, now),
+            )
+            row = await cursor.fetchone()
+            await db.commit()
+            return row is not None
+
+    async def upsert_review_threads_connection(
+        self,
+        *,
+        telegram_user_id: int,
+        threads_user_id: str,
+        username: str | None,
+        access_token_encrypted: bytes,
+        token_type: str,
+        expires_at: datetime,
+    ) -> None:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            cursor = await db.execute(
+                """
+                SELECT 1 FROM reviewer_access_grants
+                WHERE telegram_user_id = ? AND expires_at > ?
+                """,
+                (telegram_user_id, now),
+            )
+            if await cursor.fetchone() is None:
+                raise ValueError("Reviewer access is no longer active")
+            await db.execute(
+                """
+                INSERT INTO threads_review_accounts (
+                    telegram_user_id, threads_user_id, username,
+                    access_token_encrypted, token_type, expires_at,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(telegram_user_id) DO UPDATE SET
+                    threads_user_id = excluded.threads_user_id,
+                    username = excluded.username,
+                    access_token_encrypted = excluded.access_token_encrypted,
+                    token_type = excluded.token_type,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    telegram_user_id,
+                    threads_user_id,
+                    username,
+                    access_token_encrypted,
+                    token_type,
+                    to_db_timestamp(expires_at),
+                    now,
+                    now,
+                ),
+            )
+            await db.commit()
+
+    async def get_review_threads_account(self, telegram_user_id: int) -> dict | None:
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            cursor = await db.execute(
+                """
+                SELECT a.telegram_user_id, a.threads_user_id, a.username,
+                       a.access_token_encrypted, a.token_type, a.expires_at
+                FROM threads_review_accounts AS a
+                JOIN reviewer_access_grants AS g
+                  ON g.telegram_user_id = a.telegram_user_id
+                WHERE a.telegram_user_id = ? AND g.expires_at > ?
+                """,
+                (telegram_user_id, now),
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def disconnect_review_threads_account(self, telegram_user_id: int) -> bool:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                "DELETE FROM threads_review_accounts WHERE telegram_user_id = ?",
+                (telegram_user_id,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def upsert_threads_connection(
         self,
@@ -687,12 +927,33 @@ class Database:
 
     async def delete_threads_user_data(self, threads_user_id: str) -> bool:
         async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
                 "DELETE FROM threads_accounts WHERE threads_user_id = ?",
                 (threads_user_id,),
             )
+            deleted = cursor.rowcount
+            cursor = await db.execute(
+                """
+                SELECT telegram_user_id
+                FROM threads_review_accounts
+                WHERE threads_user_id = ?
+                """,
+                (threads_user_id,),
+            )
+            reviewer_ids = [int(row["telegram_user_id"]) for row in await cursor.fetchall()]
+            cursor = await db.execute(
+                "DELETE FROM threads_review_accounts WHERE threads_user_id = ?",
+                (threads_user_id,),
+            )
+            deleted += cursor.rowcount
+            if reviewer_ids:
+                await db.executemany(
+                    "DELETE FROM reviewer_access_grants WHERE telegram_user_id = ?",
+                    [(reviewer_id,) for reviewer_id in reviewer_ids],
+                )
             await db.commit()
-            return cursor.rowcount > 0
+            return deleted > 0
 
     async def record_data_deletion(
         self,

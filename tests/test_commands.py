@@ -7,7 +7,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.types import Update
 
 from bot.config import settings
-from bot.handlers import setup_handlers
+from bot.handlers import configure_bot_commands, setup_handlers
 
 
 class FakeAuth:
@@ -51,7 +51,13 @@ class MockTelegramSession(BaseSession):
             yield b""
 
 
-def make_update(text: str, *, user_id: int = 7, chat_type: str = "private") -> Update:
+def make_update(
+    text: str,
+    *,
+    user_id: int = 7,
+    chat_type: str = "private",
+    language_code: str | None = "ru",
+) -> Update:
     return Update.model_validate(
         {
             "update_id": 1,
@@ -59,7 +65,12 @@ def make_update(text: str, *, user_id: int = 7, chat_type: str = "private") -> U
                 "message_id": 1,
                 "date": 1_700_000_000,
                 "chat": {"id": user_id if chat_type == "private" else -100, "type": chat_type},
-                "from": {"id": user_id, "is_bot": False, "first_name": "Admin"},
+                "from": {
+                    "id": user_id,
+                    "is_bot": False,
+                    "first_name": "Admin",
+                    "language_code": language_code,
+                },
                 "text": text,
                 "entities": [{"type": "bot_command", "offset": 0, "length": len(text)}],
             },
@@ -88,7 +99,11 @@ async def test_connect_command_is_admin_only_and_private(monkeypatch):
     try:
         await dp.feed_update(bot, make_update("/connect_threads"))
         assert auth.connect_calls == [
-            {"telegram_user_id": 7, "target_chat_id": -100999}
+            {
+                "telegram_user_id": 7,
+                "target_chat_id": -100999,
+                "language": "ru",
+            }
         ]
         reply_markup = session.requests[-1].reply_markup
         assert reply_markup.inline_keyboard[0][0].url.startswith(
@@ -134,3 +149,46 @@ async def test_status_and_disconnect_commands(monkeypatch):
         assert "отключён" in session.requests[-1].text
     finally:
         await bot.session.close()
+
+
+@pytest.mark.asyncio
+async def test_help_uses_telegram_user_language(monkeypatch):
+    monkeypatch.setattr(settings, "threads_oauth_admin_user_ids_raw", "7")
+    dp = Dispatcher()
+    setup_handlers(
+        dp,
+        search_service=AsyncMock(),
+        database=AsyncMock(),
+        watcher=AsyncMock(),
+        threads_auth=FakeAuth(),
+    )
+    session = MockTelegramSession()
+    bot = Bot("123456:TEST_TOKEN", session=session)
+    try:
+        await dp.feed_update(bot, make_update("/help", language_code="ru-RU"))
+        assert "Пул фраз" in session.requests[-1].text
+
+        await dp.feed_update(bot, make_update("/help", language_code="fr"))
+        assert "Phrase pool" in session.requests[-1].text
+
+        await dp.feed_update(bot, make_update("/help", language_code=None))
+        assert "Phrase pool" in session.requests[-1].text
+    finally:
+        await bot.session.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_command_descriptions_have_english_default_and_russian_locale():
+    session = MockTelegramSession()
+    bot = Bot("123456:TEST_TOKEN", session=session)
+    try:
+        await configure_bot_commands(bot)
+    finally:
+        await bot.session.close()
+
+    assert len(session.requests) == 2
+    default_menu, russian_menu = session.requests
+    assert default_menu.language_code is None
+    assert default_menu.commands[0].description.startswith("Start the bot")
+    assert russian_menu.language_code == "ru"
+    assert russian_menu.commands[0].description.startswith("Запустить бота")

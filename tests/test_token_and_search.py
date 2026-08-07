@@ -1,10 +1,11 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
 
 from bot.crypto import TokenCipher
+from bot.models import ThreadPost
 from bot.search_service import SearchService
 from bot.storage import Database, utc_now
 from bot.threads_client import ThreadsClient
@@ -130,3 +131,68 @@ async def test_watcher_resolves_token_once_per_cycle(tmp_path):
     assert stats.phrases_checked == 2
     assert manager.calls == 1
     assert search.calls == [("first", "cycle-token"), ("second", "cycle-token")]
+
+
+@pytest.mark.asyncio
+async def test_watcher_notification_uses_stored_chat_language(tmp_path):
+    database = Database(tmp_path / "bot.db")
+    cipher = TokenCipher(Fernet.generate_key().decode("ascii"))
+    await database.upsert_threads_connection(
+        threads_user_id="42",
+        username="agent",
+        access_token_encrypted=cipher.encrypt("cycle-token"),
+        token_type="bearer",
+        expires_at=utc_now() + timedelta(days=60),
+        connected_by_telegram_user_id=1,
+        target_chat_id=-1001,
+    )
+    phrase_id, _ = await database.add_phrase("launch")
+    await database.mark_phrase_initialized(phrase_id)
+    await database.set_monitoring(-1001, True)
+    await database.set_chat_language(-1001, "en")
+
+    class Manager:
+        async def get_access_token(self):
+            return "cycle-token"
+
+    class Search:
+        calls = 0
+
+        async def search_by_keyword(self, query, *, search_type, access_token):
+            self.calls += 1
+            post = ThreadPost(
+                id=f"post-{self.calls}",
+                text="New launch",
+                username="author",
+                permalink="https://threads.net/post/example",
+                timestamp=datetime(2026, 8, 7, tzinfo=timezone.utc),
+                media_type="TEXT_POST",
+                has_replies=False,
+                is_reply=False,
+                is_quote_post=False,
+            )
+            return type("Result", (), {"posts": [post]})()
+
+    class Bot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, chat_id, text, **kwargs):
+            self.messages.append((chat_id, text, kwargs))
+
+    bot = Bot()
+    watcher = SearchWatcher(
+        bot,
+        database=database,
+        search_service=Search(),
+        token_manager=Manager(),
+    )
+
+    await watcher.run_once()
+    assert "New post" in bot.messages[-1][1]
+    assert "Open in Threads" in bot.messages[-1][1]
+
+    await database.set_chat_language(-1001, "ru")
+    await watcher.run_once()
+    assert "Новый пост" in bot.messages[-1][1]
+    assert "Открыть в Threads" in bot.messages[-1][1]
