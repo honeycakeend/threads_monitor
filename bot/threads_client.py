@@ -1,9 +1,13 @@
+import logging
 from typing import Any
 
 import httpx
 
 from bot.config import MediaType, SearchMode, SearchType, settings
 from bot.models import SearchResult, ThreadPost
+
+logger = logging.getLogger(__name__)
+_MAX_LOG_BODY = 4000
 
 DEFAULT_FIELDS = (
     "id,text,media_type,permalink,timestamp,username,"
@@ -59,22 +63,27 @@ class ThreadsClient:
         if author_username:
             params["author_username"] = author_username.lstrip("@")
 
+        url = f"{self._base_url}/keyword_search"
+        self._log_request("GET", url, params)
+
         try:
             if self._http_client is not None:
                 response = await self._http_client.get(
-                    f"{self._base_url}/keyword_search",
+                    url,
                     params=params,
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
             else:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(
-                        f"{self._base_url}/keyword_search",
+                        url,
                         params=params,
                         headers={"Authorization": f"Bearer {access_token}"},
                     )
         except httpx.HTTPError:
             raise ThreadsAPIError("Could not reach the Threads API") from None
+
+        self._log_response(response)
 
         if response.status_code >= 400:
             self._raise_api_error(response)
@@ -87,11 +96,61 @@ class ThreadsClient:
             posts = [ThreadPost.from_api(item) for item in raw_posts]
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ThreadsAPIError("Threads API returned an unexpected response") from None
+        logger.info(
+            "Threads keyword_search q=%r type=%s mode=%s http=%s posts=%s",
+            query.strip(),
+            params["search_type"],
+            params["search_mode"],
+            response.status_code,
+            len(posts),
+        )
         return SearchResult(query=query.strip(), posts=posts, total=len(posts))
 
+    @classmethod
+    def _log_request(cls, method: str, url: str, params: dict[str, Any]) -> None:
+        if not settings.threads_api_debug:
+            return
+        logger.info("Threads request %s %s params=%s", method, url, params)
+
+    @classmethod
+    def _log_response(cls, response: httpx.Response) -> None:
+        excerpt = cls._response_excerpt(response)
+        if settings.threads_api_debug:
+            logger.info(
+                "Threads response HTTP %s %s body=%s",
+                response.status_code,
+                cls._safe_request_url(response),
+                excerpt,
+            )
+            return
+        if response.status_code >= 400:
+            logger.warning(
+                "Threads API error HTTP %s body=%s",
+                response.status_code,
+                excerpt,
+            )
+
     @staticmethod
-    def _raise_api_error(response: httpx.Response) -> None:
+    def _safe_request_url(response: httpx.Response) -> str:
+        url = response.request.url
+        params = [
+            (key, value)
+            for key, value in url.params.multi_items()
+            if key.lower() != "access_token"
+        ]
+        return str(url.copy_with(params=params))
+
+    @staticmethod
+    def _response_excerpt(response: httpx.Response) -> str:
+        text = response.text.replace("\n", " ").strip()
+        if len(text) > _MAX_LOG_BODY:
+            return text[:_MAX_LOG_BODY] + "...[truncated]"
+        return text
+
+    @classmethod
+    def _raise_api_error(cls, response: httpx.Response) -> None:
+        excerpt = cls._response_excerpt(response)
         raise ThreadsAPIError(
-            f"Threads API rejected the request (HTTP {response.status_code})",
+            f"Threads API rejected the request (HTTP {response.status_code}): {excerpt}",
             status_code=response.status_code,
         )
