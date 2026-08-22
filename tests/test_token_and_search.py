@@ -8,7 +8,7 @@ from bot.crypto import TokenCipher
 from bot.models import ThreadPost
 from bot.search_service import SearchService
 from bot.storage import Database, utc_now
-from bot.threads_client import ThreadsClient
+from bot.threads_client import ThreadsAPIError, ThreadsClient
 from bot.threads_oauth import OAuthToken, ThreadsTokenManager
 from bot.watcher import SearchWatcher
 
@@ -80,6 +80,62 @@ async def test_search_uses_selected_token_in_header_not_query():
     assert result.total == 0
     assert manager.calls == 1
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_logs_request_and_response_without_token(
+    caplog, monkeypatch
+):
+    from bot import threads_client as client_module
+
+    monkeypatch.setattr(client_module.settings, "threads_api_debug", True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "1", "username": "publicuser", "text": "hello"}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with caplog.at_level("INFO"):
+            result = await ThreadsClient(http_client=client).keyword_search(
+                "launch",
+                access_token="secret-token",
+            )
+
+    assert result.total == 1
+    text = caplog.text
+    assert "Threads request GET" in text
+    assert "keyword_search" in text
+    assert "q': 'launch'" in text or "q': \"launch\"" in text
+    assert "secret-token" not in text
+    assert "Bearer" not in text
+    assert "HTTP 200" in text
+    assert "publicuser" in text
+    assert "Threads keyword_search q='launch'" in text
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_includes_api_error_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={
+                "error": {
+                    "message": "Application does not have permission",
+                    "code": 10,
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ThreadsAPIError, match="Application does not have permission") as exc:
+            await ThreadsClient(http_client=client).keyword_search(
+                "launch",
+                access_token="secret-token",
+            )
+
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
