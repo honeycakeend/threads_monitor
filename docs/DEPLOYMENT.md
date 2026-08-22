@@ -100,6 +100,7 @@ sudo systemctl status threads-bot --no-pager
 sudo journalctl -u threads-bot -n 100 --no-pager
 curl -fsS http://127.0.0.1:8080/healthz
 curl -fsS https://threads-auth.adigitalnyc.com/healthz
+curl -fsS -o /dev/null -w '%{http_code}\n' https://threads-auth.adigitalnyc.com/
 ```
 
 Expected health response:
@@ -107,6 +108,8 @@ Expected health response:
 ```json
 {"status":"ok"}
 ```
+
+The website root must return HTTP 200. Meta will not publish the app if the configured Website URL is a 404.
 
 Never paste or search for tokens/codes in logs. Uvicorn access logging is disabled by application configuration. Keep reverse-proxy access logging disabled unless query-string redaction is explicitly configured.
 
@@ -137,6 +140,25 @@ The current legal pages can continue to be served with GitHub Pages:
 - User-facing deletion instructions: `https://honeycakeend.github.io/threads_monitor/data-deletion.html`
 
 The Meta **Data Deletion Request URL** is the HTTPS POST callback on `threads-auth.adigitalnyc.com`, not the static instruction page.
+
+Also fill **Settings → Basic** before clicking Publish. These fields are required to go live and are separate from App Review:
+
+- Display name
+- Contact email
+- App icon (512×512 to 1024×1024, JPEG/PNG/GIF, under 5 MB)
+- Category
+- Privacy Policy URL: `https://honeycakeend.github.io/threads_monitor/privacy-policy.html`
+- Terms of Service URL: `https://honeycakeend.github.io/threads_monitor/terms.html`
+- User Data Deletion: choose **Data Deletion Instructions URL** (not callback) and paste `https://honeycakeend.github.io/threads_monitor/data-deletion.html`
+- Data Protection Officer contact, if the form asks for one: `adigitalnyc@gmail.com`
+
+Do not put `https://threads-auth.adigitalnyc.com/oauth/threads/data-deletion` into the Basic Settings instructions field. That endpoint only accepts POST; a GET returns 405, and Meta will refuse to publish.
+
+## Publish after App Review
+
+App Review approval does not publish the app. Open **Publish** in the left menu, expand **Check that all requirements are met**, fix any remaining items, then click **Publish** / **Go live** in the lower right.
+
+Business Verification is not always required to click Publish, but Advanced Access to other people's Threads data stays inactive until the connected Business is verified.
 
 ## 7. Manual end-to-end verification
 

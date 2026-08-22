@@ -153,7 +153,10 @@ Configure the Meta Threads use case with:
 - Valid OAuth Redirect URI: `https://threads-auth.adigitalnyc.com/oauth/threads/callback`
 - Deauthorize Callback URL: `https://threads-auth.adigitalnyc.com/oauth/threads/deauthorize`
 - Data Deletion Request URL: `https://threads-auth.adigitalnyc.com/oauth/threads/data-deletion`
-- Website URL: `https://threads-auth.adigitalnyc.com`
+- Website URL: `https://threads-auth.adigitalnyc.com` (must return HTTP 200)
+- Privacy Policy URL: `https://honeycakeend.github.io/threads_monitor/privacy-policy.html`
+- Terms of Service URL: `https://honeycakeend.github.io/threads_monitor/terms.html`
+- User Data Deletion instructions URL: `https://honeycakeend.github.io/threads_monitor/data-deletion.html`
 - Permissions requested: `threads_basic`, `threads_keyword_search`
 
 Before submitting, add the agent Threads account as an app/test user and accept the invitation in Threads. Record a reviewer screencast that shows:
