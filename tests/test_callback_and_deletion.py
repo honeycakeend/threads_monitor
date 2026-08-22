@@ -11,7 +11,12 @@ import pytest
 from cryptography.fernet import Fernet
 
 from bot.crypto import TokenCipher
-from bot.oauth_server import create_oauth_app
+from bot.oauth_server import (
+    DATA_DELETION_INSTRUCTIONS_URL,
+    PRIVACY_POLICY_URL,
+    TERMS_OF_SERVICE_URL,
+    create_oauth_app,
+)
 from bot.storage import Database, utc_now
 from bot.threads_oauth import (
     REVIEW_OAUTH_PURPOSE,
@@ -65,6 +70,26 @@ def build_app(tmp_path):
         public_base_url="https://threads-auth.adigitalnyc.com",
     )
     return database, cipher, auth, bot, app
+
+
+@pytest.mark.asyncio
+async def test_homepage_is_public_and_links_legal_pages(tmp_path):
+    _, _, _, _, app = build_app(tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://test") as client:
+        home = await client.get("/")
+        robots = await client.get("/robots.txt")
+        deletion_get = await client.get("/oauth/threads/data-deletion")
+
+    assert home.status_code == 200
+    assert "text/html" in home.headers["content-type"]
+    assert "Threads Monitor Bot" in home.text
+    assert PRIVACY_POLICY_URL in home.text
+    assert TERMS_OF_SERVICE_URL in home.text
+    assert DATA_DELETION_INSTRUCTIONS_URL in home.text
+    assert robots.status_code == 200
+    assert "Allow: /" in robots.text
+    assert deletion_get.status_code == 405
 
 
 @pytest.mark.asyncio

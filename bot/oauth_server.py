@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 
 from aiogram import Bot
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from bot.i18n import Language, choose
 from bot.storage import Database
@@ -20,6 +20,13 @@ from bot.threads_oauth import (
 )
 
 logger = logging.getLogger(__name__)
+
+PRIVACY_POLICY_URL = "https://honeycakeend.github.io/threads_monitor/privacy-policy.html"
+TERMS_OF_SERVICE_URL = "https://honeycakeend.github.io/threads_monitor/terms.html"
+DATA_DELETION_INSTRUCTIONS_URL = (
+    "https://honeycakeend.github.io/threads_monitor/data-deletion.html"
+)
+CONTACT_EMAIL = "adigitalnyc@gmail.com"
 
 
 def create_oauth_app(
@@ -53,6 +60,17 @@ def create_oauth_app(
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> JSONResponse:
         return JSONResponse({"status": "ok"})
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def homepage() -> HTMLResponse:
+        return _homepage()
+
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots_txt() -> PlainTextResponse:
+        return PlainTextResponse(
+            "User-agent: *\nAllow: /\n",
+            media_type="text/plain; charset=utf-8",
+        )
 
     @app.get("/oauth/threads/callback", response_class=HTMLResponse)
     async def threads_callback(
@@ -358,6 +376,53 @@ async def _notify(bot: Bot, chat_id: int, text: str) -> None:
             "Could not send OAuth status notification to Telegram user_id=%s",
             chat_id,
         )
+
+
+def _homepage() -> HTMLResponse:
+    privacy = escape(PRIVACY_POLICY_URL)
+    terms = escape(TERMS_OF_SERVICE_URL)
+    deletion = escape(DATA_DELETION_INSTRUCTIONS_URL)
+    email = escape(CONTACT_EMAIL)
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Threads Monitor Bot</title>
+  <meta name="description" content="Telegram bot that searches and monitors public Threads posts by keyword through the official Meta Threads API.">
+  <meta property="og:title" content="Threads Monitor Bot">
+  <meta property="og:description" content="Telegram bot that searches and monitors public Threads posts by keyword through the official Meta Threads API.">
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 0; background: #f6f7f8; color: #171717; }}
+    main {{ max-width: 36rem; margin: 10vh auto; padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 8px 30px #0001; }}
+    h1 {{ margin: 0 0 .75rem; }}
+    p, li {{ line-height: 1.55; }}
+    a {{ color: #0b5fff; }}
+    ul {{ padding-left: 1.2rem; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Threads Monitor Bot</h1>
+    <p>
+      A Telegram bot that searches and monitors public Threads posts by keyword
+      through the official Meta Threads API.
+    </p>
+    <p>
+      Users connect a Threads account here, then run searches and receive
+      notifications in Telegram. This domain also serves the OAuth callback and
+      Meta data-deletion endpoints.
+    </p>
+    <ul>
+      <li><a href="{privacy}">Privacy Policy</a></li>
+      <li><a href="{terms}">Terms of Service</a></li>
+      <li><a href="{deletion}">Data Deletion Instructions</a></li>
+    </ul>
+    <p>Contact: <a href="mailto:{email}">{email}</a></p>
+  </main>
+</body>
+</html>"""
+    return HTMLResponse(html)
 
 
 def _html_page(
