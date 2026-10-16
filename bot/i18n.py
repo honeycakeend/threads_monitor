@@ -20,6 +20,9 @@ INSTRUCTIONS: dict[Language, str] = {
 • <b>Найти публикации</b> — разовый поиск последних или популярных постов. Фраза не сохраняется.
 • <b>Подключение Threads</b> — подключить, сменить или отключить аккаунт. Доступно администратору в личном чате.
 
+<b>Куда приходят посты</b>
+Добавьте бота в нужную группу → отправьте там /menu → «Получать уведомления в этой группе» → подтвердите. Выбрать группу может пользователь с правами «Настройки + Threads». Новая группа заменит прежнюю; пауза уведомлений сохранится.
+
 <b>Как сменить аккаунт</b>
 «Меню» → «Подключение Threads» → «Сменить аккаунт». Откройте ссылку, авторизуйте нужный аккаунт и проверьте имя профиля перед подтверждением. Если открылся прежний аккаунт, переключитесь на нужный в браузере.
 После подключения вернитесь в «Подключение Threads» и проверьте новый @username. Фразы и настройки сохранятся. Старое подключение работает до успешной авторизации нового.
@@ -45,6 +48,9 @@ An administrator connects the account in a private chat with the bot.
 • <b>Check now</b> — check all saved phrases immediately.
 • <b>Find posts</b> — search recent or popular posts once, without saving the phrase.
 • <b>Threads connection</b> — connect, change or disconnect an account. Available to administrators in private chats.
+
+<b>Where posts arrive</b>
+Add the bot to your group → send /menu there → Receive notifications in this group → confirm. Requires Settings + Threads access. The new group replaces the previous one; paused notifications stay paused.
 
 <b>Changing accounts</b>
 Menu → Threads connection → Change account. Open the link, authorize the account you want to use, and check the profile name before confirming. If the previous account opens, switch accounts in your browser.

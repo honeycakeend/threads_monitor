@@ -459,6 +459,7 @@ class Database:
                 JOIN threads_chat_bindings AS b
                   ON b.chat_id = cs.chat_id
                  AND b.active = 1
+                 AND b.is_primary = 1
                 JOIN threads_accounts AS a
                   ON a.id = b.account_id
                  AND a.active = 1
@@ -468,6 +469,110 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [int(row["chat_id"]) for row in rows]
+
+    @staticmethod
+    async def _notification_chat_id(db: aiosqlite.Connection) -> int | None:
+        cursor = await db.execute(
+            "SELECT value FROM bot_settings WHERE key = 'notification_chat_id'"
+        )
+        row = await cursor.fetchone()
+        if row is not None:
+            return int(row["value"])
+        cursor = await db.execute(
+            """SELECT b.chat_id FROM threads_chat_bindings b
+               JOIN threads_accounts a ON a.id = b.account_id
+               WHERE b.active = 1 AND b.is_primary = 1 AND a.active = 1
+                 AND a.access_token_encrypted IS NOT NULL
+               ORDER BY a.updated_at DESC LIMIT 1"""
+        )
+        row = await cursor.fetchone()
+        return int(row["chat_id"]) if row else settings.threads_primary_chat_id
+
+    async def get_notification_chat_id(self) -> int | None:
+        async with self.connection() as db:
+            return await self._notification_chat_id(db)
+
+    @staticmethod
+    async def _bind_primary_chat(
+        db: aiosqlite.Connection, account_id: int, chat_id: int, actor: int, now: str
+    ) -> None:
+        await db.execute(
+            """UPDATE threads_chat_bindings
+               SET active = 0, is_primary = 0, updated_at = ?
+               WHERE account_id = ? AND active = 1""",
+            (now, account_id),
+        )
+        await db.execute(
+            """INSERT INTO threads_chat_bindings (
+                   account_id, chat_id, is_primary, active,
+                   created_by_telegram_user_id, created_at, updated_at
+               ) VALUES (?, ?, 1, 1, ?, ?, ?)
+               ON CONFLICT(account_id, chat_id) DO UPDATE SET
+                   is_primary = 1, active = 1,
+                   created_by_telegram_user_id = excluded.created_by_telegram_user_id,
+                   updated_at = excluded.updated_at""",
+            (account_id, chat_id, actor, now, now),
+        )
+
+    async def select_notification_group(
+        self,
+        *,
+        chat_id: int,
+        actor: int,
+        expected_chat_id: int | None,
+        language: Language,
+    ) -> bool:
+        if chat_id >= 0:
+            raise ValueError("Notification destination must be a group")
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT role FROM bot_users WHERE telegram_user_id = ?", (actor,)
+            )
+            user = await cursor.fetchone()
+            role = (
+                user["role"]
+                if user
+                else (
+                    "admin" if actor in settings.threads_oauth_admin_user_ids else None
+                )
+            )
+            if actor not in settings.bot_owner_user_ids and role != "admin":
+                raise ValueError("Only Threads administrators can select a group")
+            previous = await self._notification_chat_id(db)
+            if previous != expected_chat_id:
+                return False
+            cursor = await db.execute(
+                "SELECT monitoring_enabled FROM chat_settings WHERE chat_id = ?",
+                (previous,),
+            )
+            row = await cursor.fetchone()
+            enabled = int(row["monitoring_enabled"]) if row else 0
+            await db.execute(
+                """INSERT INTO bot_settings (key, value)
+                   VALUES ('notification_chat_id', ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                (str(chat_id),),
+            )
+            await db.execute(
+                "UPDATE chat_settings SET monitoring_enabled = 0 WHERE chat_id = ?",
+                (previous,),
+            )
+            await db.execute(
+                """INSERT INTO chat_settings (chat_id, monitoring_enabled, language)
+                   VALUES (?, ?, ?) ON CONFLICT(chat_id) DO UPDATE SET
+                   monitoring_enabled = excluded.monitoring_enabled,
+                   language = excluded.language""",
+                (chat_id, enabled, language),
+            )
+            cursor = await db.execute(
+                "SELECT id FROM threads_accounts WHERE active = 1"
+            )
+            for account in await cursor.fetchall():
+                await self._bind_primary_chat(db, account["id"], chat_id, actor, now)
+            await db.commit()
+            return True
 
     async def add_phrase(
         self,
@@ -899,33 +1004,16 @@ class Database:
             assert row is not None
             account_id = int(row["id"])
 
-            await db.execute(
-                """
-                UPDATE threads_chat_bindings
-                SET is_primary = 0, updated_at = ?
-                WHERE account_id = ? AND active = 1
-                """,
-                (now, account_id),
+            # A group selected in Telegram takes precedence even when an OAuth
+            # link was created before the group changed.
+            cursor = await db.execute(
+                "SELECT value FROM bot_settings WHERE key = 'notification_chat_id'"
             )
-            await db.execute(
-                """
-                INSERT INTO threads_chat_bindings (
-                    account_id, chat_id, is_primary, active,
-                    created_by_telegram_user_id, created_at, updated_at
-                ) VALUES (?, ?, 1, 1, ?, ?, ?)
-                ON CONFLICT(account_id, chat_id) DO UPDATE SET
-                    is_primary = 1,
-                    active = 1,
-                    created_by_telegram_user_id = excluded.created_by_telegram_user_id,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    account_id,
-                    target_chat_id,
-                    connected_by_telegram_user_id,
-                    now,
-                    now,
-                ),
+            selected = await cursor.fetchone()
+            if selected:
+                target_chat_id = int(selected["value"])
+            await self._bind_primary_chat(
+                db, account_id, target_chat_id, connected_by_telegram_user_id, now
             )
             await db.execute(
                 """

@@ -333,12 +333,13 @@ def setup_handlers(
                 )
             )
             return False
-        if not reviewer_mode and settings.threads_primary_chat_id is None:
+        target_chat_id = await database.get_notification_chat_id()
+        if not reviewer_mode and target_chat_id is None:
             await message.answer(
                 choose(
                     language,
-                    ru="Рабочий чат для уведомлений ещё не настроен. Обратитесь к администратору сервиса.",
-                    en="The notification chat has not been set up yet. Contact the service administrator.",
+                    ru="Добавьте бота в рабочую группу, откройте там /menu и нажмите «Получать уведомления в этой группе».",
+                    en="Add the bot to your work group, open /menu there and choose Receive notifications in this group.",
                 )
             )
             return False
@@ -352,10 +353,10 @@ def setup_handlers(
                     language=language,
                 )
             else:
-                assert settings.threads_primary_chat_id is not None
+                assert target_chat_id is not None
                 url = await threads_auth.create_authorization_url(
                     telegram_user_id=message.from_user.id,
-                    target_chat_id=settings.threads_primary_chat_id,
+                    target_chat_id=target_chat_id,
                     language=language,
                 )
         except ThreadsOAuthError as exc:

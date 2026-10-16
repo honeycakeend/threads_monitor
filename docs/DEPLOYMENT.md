@@ -251,3 +251,14 @@ Suggested permission explanations:
 - Back up `/opt/threads_bot/data/bot.db` and the encryption key separately and securely.
 - Rotate/retain system logs so phrase text and numeric chat IDs are not kept longer than necessary.
 - After code updates, run tests before restarting the service.
+
+### Selecting the notification group
+
+Add the bot to a designated test group and allow it to send messages. As an owner
+or Settings + Threads user, send `/menu@bot_username`, choose Receive notifications
+in this group and confirm. Verify Recipient changes both there and in the private
+menu; the old group stops receiving posts and notification pause state is retained.
+Check cancellation, old confirmations, settings-only/reviewer/unauthorized users,
+and missing sending permissions. Reconnect or change Threads and restart the bot:
+the selected group must remain the recipient. Use only designated test groups for
+this check, since confirmation redirects the shared production monitoring feed.

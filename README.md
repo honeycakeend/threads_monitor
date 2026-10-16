@@ -79,7 +79,7 @@ Store the output in `THREADS_TOKEN_ENCRYPTION_KEY` and back it up securely. Repl
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `ALLOWED_USER_IDS` | Comma-separated Telegram users allowed to use the bot; keep non-empty in production |
 | `THREADS_OAUTH_ADMIN_USER_IDS` | Comma-separated users allowed to connect/status/disconnect Threads; falls back to `ALLOWED_USER_IDS` only when empty |
-| `THREADS_PRIMARY_CHAT_ID` | One chat that receives watcher notifications; group IDs are normally negative |
+| `THREADS_PRIMARY_CHAT_ID` | Initial notification chat fallback; selection in the group menu takes precedence |
 | `THREADS_APP_ID` | Threads App ID shown in the Meta Threads use case |
 | `THREADS_APP_SECRET` | Matching Threads App Secret; also verifies Meta `signed_request` callbacks |
 | `THREADS_TOKEN_ENCRYPTION_KEY` | Fernet key for token encryption at rest |
@@ -148,6 +148,16 @@ Disconnecting the production account requires confirmation, including when
 using `/disconnect_threads`. A cancelled or outdated confirmation cannot
 disconnect a newly connected account. Meta reviewer access remains isolated
 and cannot operate the production settings panel.
+
+In the destination group, an owner or a user with **Settings + Threads** access
+can choose **Получать уведомления в этой группе / Receive notifications in this group**.
+The bot verifies its sending permissions and asks for confirmation. Selection
+atomically replaces the previous recipient, preserves notification pause state,
+and persists in SQLite across restarts, disconnects and account changes. A group
+can be selected before connecting Threads. `THREADS_PRIMARY_CHAT_ID` is only the
+initial fallback; an explicit Telegram selection takes precedence, including
+when completing an older OAuth link. Cancelled or outdated confirmations cannot
+replace a more recently selected recipient. Settings-only users cannot redirect posts.
 
 ### Simple instructions
 

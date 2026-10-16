@@ -80,7 +80,7 @@ class SearchWatcher:
 
         for phrase in phrases:
             try:
-                sent = await self._process_phrase(phrase, chat_ids, access_token)
+                sent = await self._process_phrase(phrase, access_token)
                 stats.posts_sent += sent
             except ThreadsAPIError as exc:
                 stats.errors += 1
@@ -116,7 +116,6 @@ class SearchWatcher:
     async def _process_phrase(
         self,
         phrase: dict,
-        chat_ids: list[int],
         access_token: str,
     ) -> int:
         search_type = SearchType(phrase["search_type"])
@@ -133,6 +132,11 @@ class SearchWatcher:
             if await self._db.is_post_seen(phrase["id"], post.id):
                 continue
 
+            # Search can take time: use the recipient selected now, rather than
+            # a group captured before the search or an earlier phrase.
+            chat_ids = await self._db.list_notification_chats() if initialized else []
+            if initialized and not chat_ids:
+                return sent
             await self._db.mark_post_seen(phrase["id"], post.id)
 
             if not initialized:
@@ -156,14 +160,16 @@ class SearchWatcher:
 
         return sent
 
-    async def _send_post(self, chat_id: int, phrase_text: str, post: ThreadPost) -> None:
+    async def _send_post(
+        self, chat_id: int, phrase_text: str, post: ThreadPost
+    ) -> None:
         chat = await self._db.get_chat_settings(chat_id)
         language = language_from_code(chat.get("language"))
         body = format_post(post, index=1, language=language)
         heading = choose(
             language,
-            ru=f'🔔 <b>Новый пост</b> по фразе «{escape(phrase_text)}»',
-            en=f'🔔 <b>New post</b> for “{escape(phrase_text)}”',
+            ru=f"🔔 <b>Новый пост</b> по фразе «{escape(phrase_text)}»",
+            en=f"🔔 <b>New post</b> for “{escape(phrase_text)}”",
         )
         message = f"{heading}\n\n{body}"
         await self._bot.send_message(

@@ -89,11 +89,13 @@ async def test_connect_command_is_admin_only_and_private(monkeypatch):
     monkeypatch.setattr(settings, "threads_app_secret", "secret")
     monkeypatch.setattr(settings, "threads_token_encryption_key", "configured")
     auth = FakeAuth()
+    database = AsyncMock()
+    database.get_notification_chat_id.return_value = -100999
     dp = Dispatcher()
     setup_handlers(
         dp,
         search_service=AsyncMock(),
-        database=AsyncMock(),
+        database=database,
         watcher=AsyncMock(),
         threads_auth=auth,
     )

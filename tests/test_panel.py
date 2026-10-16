@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.methods import EditMessageText, GetChat, SendMessage
-from aiogram.types import Chat, Message, ReplyKeyboardMarkup, Update
+from aiogram.methods import EditMessageText, GetChat, GetChatMember, SendMessage
+from aiogram.types import Chat, ChatMemberMember, Message, ReplyKeyboardMarkup, Update
 from test_commands import MockTelegramSession, make_update
 
 from bot.config import settings
@@ -21,9 +21,18 @@ class PanelSession(MockTelegramSession):
     def __init__(self):
         super().__init__()
         self.next_id = 100
+        self.send_allowed = True
 
     async def make_request(self, bot, method, timeout=None):
         self.requests.append(method)
+        if isinstance(method, GetChatMember):
+            if not self.send_allowed:
+                from aiogram.exceptions import TelegramForbiddenError
+
+                raise TelegramForbiddenError(method=method, message="Forbidden")
+            return ChatMemberMember(
+                user={"id": bot.id, "is_bot": True, "first_name": "Bot"}
+            )
         if isinstance(method, GetChat):
             return Chat(id=method.chat_id, type="supergroup", title="Команда")
         if isinstance(method, (SendMessage, EditMessageText)):
@@ -64,7 +73,15 @@ class Harness:
         await self.dp.feed_update(self.bot, update)
 
     async def click(
-        self, action, *, user=7, owner=7, language="ru", group=False, message_id=50
+        self,
+        action,
+        *,
+        user=7,
+        owner=7,
+        language="ru",
+        group=False,
+        message_id=50,
+        chat_id=-100,
     ):
         update = Update.model_validate(
             {
@@ -83,7 +100,7 @@ class Harness:
                         "message_id": message_id,
                         "date": 1_700_000_000,
                         "chat": {
-                            "id": -100 if group else user,
+                            "id": chat_id if group else user,
                             "type": "supergroup" if group else "private",
                         },
                         "from": {"id": 123456, "is_bot": True, "first_name": "Bot"},
@@ -480,4 +497,95 @@ async def test_bottom_keyboard_is_restored_after_input(app):
         isinstance(request, SendMessage)
         and isinstance(request.reply_markup, ReplyKeyboardMarkup)
         for request in app.session.requests
+    )
+
+
+@pytest.mark.asyncio
+async def test_group_selection_is_admin_only_and_only_in_other_group(app):
+    await app.text("/menu")
+    assert not any(
+        button.callback_data.endswith(":destination") for button in app.buttons
+    )
+    await app.click("home", group=True, chat_id=-200)
+    assert any(
+        button.text == "Получать уведомления в этой группе" for button in app.buttons
+    )
+    await app.click("home", group=True)
+    assert not any(
+        button.callback_data.endswith(":destination") for button in app.buttons
+    )
+    for group in (False, True):
+        await app.click("destination", group=group, user=8, owner=8, chat_id=-200)
+        assert "правами" in app.last.text
+        await app.click(
+            "confirm_destination", group=group, user=8, owner=8, chat_id=-200
+        )
+    assert await app.db.get_notification_chat_id() == -100
+
+
+@pytest.mark.asyncio
+async def test_group_selection_requires_confirmation_and_keeps_pause(app):
+    await app.db.set_monitoring(-100, False)
+    await app.click("destination", group=True, chat_id=-200)
+    assert "единственным получателем" in app.last.text
+    assert await app.db.get_notification_chat_id() == -100
+    await app.click("confirm_destination", group=True, chat_id=-200)
+    assert await app.db.get_notification_chat_id() == -200
+    assert "Группа выбрана" in app.last.text
+    assert "Получатель: этот чат" in app.last.text
+    assert not (await app.db.get_chat_settings(-200))["monitoring_enabled"]
+    await app.text("/menu")
+    assert "Получатель: Команда" in app.last.text
+    await app.db.add_phrases(["designer"])
+    await app.click("notify:on")
+    assert (await app.db.get_chat_settings(-200))["monitoring_enabled"]
+    await app.click("change_account")
+    app.auth.create_authorization_url.assert_awaited_once_with(
+        telegram_user_id=7,
+        target_chat_id=-200,
+        language="ru",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_and_wrong_message_group_confirmations_do_nothing(app):
+    await app.click("destination", group=True, chat_id=-200)
+    await app.click("home", group=True, chat_id=-200)
+    await app.click("confirm_destination", group=True, chat_id=-200)
+    assert await app.db.get_notification_chat_id() == -100
+    await app.click("destination", group=True, chat_id=-200)
+    await app.click("confirm_destination", group=True, chat_id=-200, message_id=51)
+    assert await app.db.get_notification_chat_id() == -100
+    await app.click("destination", group=True, chat_id=-200)
+    await app.click("confirm_destination", group=True, chat_id=-300)
+    assert await app.db.get_notification_chat_id() == -100
+
+
+@pytest.mark.asyncio
+async def test_group_selection_rechecks_bot_sending_permission_on_confirmation(app):
+    app.session.send_allowed = False
+    await app.click("destination", group=True, chat_id=-200)
+    assert "Разрешите" in app.last.text
+    app.session.send_allowed = True
+    await app.click("destination", group=True, chat_id=-200)
+    app.session.send_allowed = False
+    await app.click("confirm_destination", group=True, chat_id=-200)
+    assert "Разрешите" in app.last.text
+    assert await app.db.get_notification_chat_id() == -100
+
+
+@pytest.mark.asyncio
+async def test_can_start_oauth_after_group_selection_without_server_chat_setting(
+    app, monkeypatch
+):
+    monkeypatch.setattr(settings, "threads_primary_chat_id", None)
+    await app.click("connect")
+    app.auth.create_authorization_url.assert_not_awaited()
+    await app.click("destination", group=True, chat_id=-200)
+    await app.click("confirm_destination", group=True, chat_id=-200)
+    await app.click("connect")
+    app.auth.create_authorization_url.assert_awaited_once_with(
+        telegram_user_id=7,
+        target_chat_id=-200,
+        language="ru",
     )

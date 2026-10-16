@@ -4,8 +4,12 @@ from collections.abc import Awaitable, Callable
 from html import escape
 
 from aiogram import Dispatcher, F
-from aiogram.enums import ChatType
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.enums import ChatMemberStatus, ChatType
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+)
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,7 +25,7 @@ from aiogram.types import (
 
 from bot.access import AccessService
 from bot.access_panel import AccessPanel, setup_access_input
-from bot.config import SearchType, settings
+from bot.config import SearchType
 from bot.i18n import (
     INSTRUCTIONS,
     REVIEW_HELP_TEXT,
@@ -49,6 +53,7 @@ class PanelInput(StatesGroup):
     search = State()
     search_type = State()
     disconnect = State()
+    destination = State()
 
 
 LABELS = {
@@ -65,6 +70,11 @@ LABELS = {
     "change_account": ("Сменить аккаунт", "Change account"),
     "disconnect": ("Отключить аккаунт", "Disconnect account"),
     "confirm_disconnect": ("Да, отключить", "Yes, disconnect"),
+    "destination": (
+        "Получать уведомления в этой группе",
+        "Receive notifications in this group",
+    ),
+    "confirm_destination": ("Да, выбрать эту группу", "Yes, use this group"),
     "instructions": ("Инструкция", "Instructions"),
     "cancel": ("Отмена", "Cancel"),
     "recent": ("Последние", "Recent"),
@@ -161,11 +171,33 @@ class SettingsPanel:
 
     async def target(self) -> tuple[dict | None, int | None]:
         account = await self.auth.status()
-        target = account.get("primary_chat_id") if account else None
+        return account, await self.db.get_notification_chat_id()
+
+    async def can_select_group(self, message: Message) -> bool:
         return (
-            account,
-            target if target is not None else settings.threads_primary_chat_id,
+            message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}
+            and message.from_user is not None
+            and await self.access.can_manage_threads(message.from_user.id)
         )
+
+    async def can_send_to_group(self, message: Message) -> bool:
+        try:
+            member = await message.bot.get_chat_member(message.chat.id, message.bot.id)
+            if member.status in {
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.CREATOR,
+            }:
+                return True
+            if member.status == ChatMemberStatus.RESTRICTED:
+                return bool(member.is_member and member.can_send_messages)
+            if member.status == ChatMemberStatus.MEMBER:
+                chat = await message.bot.get_chat(message.chat.id)
+                return (
+                    not chat.permissions or chat.permissions.can_send_messages is True
+                )
+        except (TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError):
+            pass
+        return False
 
     async def home(self, message: Message, language: Language):
         account, target = await self.target()
@@ -203,8 +235,8 @@ class SettingsPanel:
             )
             next_step = choose(
                 language,
-                ru="Попросите администратора настроить чат уведомлений.",
-                en="Ask your administrator to configure the notification chat.",
+                ru="Добавьте бота в рабочую группу. В её меню нажмите «Получать уведомления в этой группе».",
+                en="Add the bot to your work group. In its menu, choose Receive notifications in this group.",
             )
         elif not enabled:
             status = choose(
@@ -265,6 +297,8 @@ class SettingsPanel:
             ]
         )
         rows.extend([[(label(key, language), key)] for key in ("run", "search")])
+        if target != message.chat.id and await self.can_select_group(message):
+            rows.append([(label("destination", language), "destination")])
         if await is_admin(message, self.access):
             rows.append([(label("account", language), "account")])
         if (
@@ -495,7 +529,85 @@ def setup_panel_handlers(
                 ),
             )
             return
-        if action == "home":
+        if action in {"destination", "confirm_destination"}:
+            notice = ""
+            if not await panel.can_select_group(message):
+                screen = (
+                    choose(
+                        language,
+                        ru="Выбрать группу может пользователь с правами «Настройки + Threads» в меню самой группы.",
+                        en="A user with Settings + Threads access can select a group from that group's menu.",
+                    ),
+                    back,
+                )
+            elif action == "confirm_destination" and (
+                previous_state != PanelInput.destination.state
+                or previous.get("panel_id") != message.message_id
+                or previous.get("group_id") != message.chat.id
+            ):
+                screen = (
+                    choose(
+                        language,
+                        ru="Выбор отменён или устарел. Откройте меню группы и выберите её заново.",
+                        en="Selection cancelled or expired. Open the group menu and select it again.",
+                    ),
+                    back,
+                )
+            elif not await panel.can_send_to_group(message):
+                screen = (
+                    choose(
+                        language,
+                        ru="Не удалось подтвердить право бота отправлять сообщения. Разрешите ему писать в этой группе и повторите выбор.",
+                        en="Could not confirm the bot can send messages. Allow it to post in this group and try again.",
+                    ),
+                    back,
+                )
+            elif action == "destination":
+                _, target = await panel.target()
+                await state.set_state(PanelInput.destination)
+                await state.update_data(
+                    panel_id=message.message_id,
+                    group_id=message.chat.id,
+                    previous_target=target,
+                )
+                screen = (
+                    choose(
+                        language,
+                        ru=f"<b>Выбрать группу «{escape(message.chat.title or str(message.chat.id))}»?</b>\n\nОна станет единственным получателем новых постов. В прежнюю группу уведомления больше не будут отправляться. Если уведомления были приостановлены, они останутся на паузе. Аккаунт Threads и фразы сохранятся.",
+                        en=f"<b>Use {escape(message.chat.title or str(message.chat.id))}?</b>\n\nThis group will be the only recipient of new posts. Notifications to the previous group will stop. Paused notifications will remain paused. The Threads account and phrases will be kept.",
+                    ),
+                    [
+                        [
+                            (
+                                label("confirm_destination", language),
+                                "confirm_destination",
+                            )
+                        ],
+                        [(label("cancel", language), "home")],
+                    ],
+                )
+            else:
+                try:
+                    saved = await database.select_notification_group(
+                        chat_id=message.chat.id,
+                        actor=owner,
+                        expected_chat_id=previous.get("previous_target"),
+                        language=language,
+                    )
+                except ValueError:
+                    saved = False
+                notice = choose(
+                    language,
+                    ru="Группа выбрана. Проверьте статус уведомлений ниже."
+                    if saved
+                    else "Получатель или ваши права изменились. Выберите группу заново.",
+                    en="Group selected. Check notification status below."
+                    if saved
+                    else "The recipient or your access changed. Select the group again.",
+                )
+                text, rows = await panel.home(message, language)
+                screen = f"{notice}\n\n{text}", rows
+        elif action == "home":
             await send_navigation(message, language)
             screen = await panel.home(message, language)
         elif action == "instructions":

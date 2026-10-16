@@ -385,15 +385,16 @@ class ThreadsAuthService:
                 raise ThreadsOAuthError(
                     "Threads administrator access was revoked during authorization"
                 ) from exc
-            await self._db.set_chat_language(
-                int(state["target_chat_id"]),
-                language,
-            )
+            account = await self._db.get_active_threads_account()
+            target_chat_id = int(account["primary_chat_id"])
+            await self._db.set_chat_language(target_chat_id, language)
         else:
             raise ThreadsOAuthError("OAuth state has an unsupported purpose")
         return CompletedAuthorization(
             telegram_user_id=telegram_user_id,
-            target_chat_id=int(state["target_chat_id"]),
+            target_chat_id=target_chat_id
+            if purpose == PRIMARY_OAUTH_PURPOSE
+            else int(state["target_chat_id"]),
             threads_user_id=profile.id,
             username=profile.username,
             expires_at=expires_at,
