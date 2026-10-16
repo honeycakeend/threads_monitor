@@ -22,16 +22,24 @@ from bot.watcher import SearchWatcher
         ("café", "Cafe\u0301 nearby", False, True),
         ("ищу дизайнера", "Ищу дизайнера", True, False),
         ("ищу дизайнера", "Мой новый проект", False, False),
-        ("ищу дизайнера", "Ищу опытного дизайнера", False, False),
-        ("ищу дизайнера", "дизайнера ищу", False, False),
+        ("ищу дизайнера", "Ищу опытного дизайнера", False, True),
+        ("ищу дизайнера", "дизайнера ищу", False, True),
         ("ищу дизайнера", None, False, False),
         ("ищу дизайнера", "", False, False),
         (" ", "любой пост", False, False),
+        ("ищу дизайнера", "Ищу хорошего дизайнера", False, True),
+        ("ищу дизайнера", "Ищу! Хорошего, опытного дизайнера.", False, True),
+        ("ищу дизайнера", "Ищу хорошего дизайнера", True, False),
+        ("ищу дизайнера", "Ищу разработчика", False, False),
+        ("ищу дизайнера", "Резюме дизайнера", False, False),
+        ("ищу дизайнера", "Неищу дизайнера", False, False),
+        ("ищу дизайнера", "Ищу дизайнера123", False, False),
+        ("ищу дизайнера", "Ищу дизайнеров", False, False),
+        ("ищу дизайнера", "Ищу дизайнер", False, False),
+        ("!!!", "Любой пост!", False, False),
     ],
 )
-def test_only_literal_phrase_in_own_non_reply_text_matches(
-    query, text, is_reply, expected
-):
+def test_all_query_words_must_be_in_own_non_reply_text(query, text, is_reply, expected):
     post = ThreadPost.from_api({"id": "post", "text": text, "is_reply": is_reply})
     assert matches_post_text(post, query) is expected
 
@@ -56,6 +64,21 @@ def api_posts():
         {"id": "own-quote-text", "text": "Ищу дизайнера", "is_quote_post": True},
         {"id": "username-only", "username": "ищу дизайнера", "text": "Портфолио"},
         {"id": "empty", "has_replies": True},
+        {"id": "extra-words", "text": "Ищу хорошего дизайнера"},
+        {"id": "reordered", "text": "Дизайнера для сайта ищу"},
+        {"id": "missing-word", "text": "Посоветуйте хорошего дизайнера"},
+        {
+            "id": "split-own-comment",
+            "text": "Ищу специалиста",
+            "has_replies": True,
+            "replies": {"data": [{"text": "дизайнера"}]},
+        },
+        {
+            "id": "split-own-quote",
+            "text": "Ищу специалиста",
+            "is_quote_post": True,
+            "quoted_post": {"text": "дизайнера"},
+        },
     ]
 
 
@@ -81,8 +104,10 @@ async def test_real_search_pipeline_filters_api_results_and_updates_total(sort):
         "original",
         "with-comments",
         "own-quote-text",
+        "extra-words",
+        "reordered",
     ]
-    assert result.total == 3
+    assert result.total == 5
     assert len(requests) == 1
 
 
@@ -133,9 +158,12 @@ async def test_watcher_sends_matching_originals_and_does_not_mark_replies_seen(
         )
         stats = await watcher.run_once()
         repeat = await watcher.run_once()
-    assert stats.errors == 0 and stats.posts_sent == 3
+    assert stats.errors == 0 and stats.posts_sent == 5
     assert repeat.posts_sent == 0
-    assert bot.send_message.await_count == 3
+    assert bot.send_message.await_count == 5
     assert not await db.is_post_seen(phrase_id, "reply")
     assert not await db.is_post_seen(phrase_id, "comment-only")
     assert not await db.is_post_seen(phrase_id, "quote-only")
+
+    assert not await db.is_post_seen(phrase_id, "split-own-comment")
+    assert not await db.is_post_seen(phrase_id, "split-own-quote")

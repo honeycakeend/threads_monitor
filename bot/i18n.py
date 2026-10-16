@@ -13,7 +13,7 @@ INSTRUCTIONS: dict[Language, str] = {
 Подключить аккаунт может администратор в личном чате с ботом.
 
 <b>Кнопки в меню</b>
-• <b>Фразы для отслеживания</b> — добавить или удалить слова и фразы, которые нужно искать. Например: «ищу дизайнера».
+• <b>Фразы для отслеживания</b> — добавить или удалить слова и фразы, которые нужно искать. Например: «ищу дизайнера» найдёт и «ищу хорошего дизайнера». Все слова должны быть в самом посте.
 • <b>Частота проверки</b> — выбрать, как часто искать новые публикации.
 • <b>Включить / Приостановить уведомления</b> — управлять отправкой в указанный рабочий чат.
 • <b>Проверить сейчас</b> — запустить проверку всех сохранённых фраз.
@@ -42,7 +42,7 @@ Tap Menu below → connect Threads → add phrases → enable notifications.
 An administrator connects the account in a private chat with the bot.
 
 <b>Menu buttons</b>
-• <b>Tracked phrases</b> — add or remove words and phrases to search for. For example: “looking for a designer”.
+• <b>Tracked phrases</b> — add or remove words and phrases to search for. For example: “looking for a designer” also matches “looking for a good designer”. All words must be in the post itself.
 • <b>Check frequency</b> — choose how often to look for new posts.
 • <b>Enable / Pause notifications</b> — control delivery to the displayed work chat.
 • <b>Check now</b> — check all saved phrases immediately.

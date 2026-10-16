@@ -116,8 +116,11 @@ python scripts/search_cli.py "keyword" --limit 3
 ### Post text matching
 
 Keyword searches and monitoring only keep top-level posts (`is_reply = false`)
-whose own `text` contains the literal query phrase. Matching ignores case,
-repeated whitespace and line breaks, and normalizes Unicode to NFC. Replies are
+whose own `text` contains every query word, in any order. Additional words,
+punctuation and line breaks may appear between them: `ищу дизайнера` matches
+`ищу хорошего дизайнера` and `дизайнера для сайта ищу`. Matching uses whole words
+(Unicode word characters), ignores case, and normalizes Unicode to NFC.
+Word forms must match; it does not stem words or infer synonyms. Replies are
 excluded even when they contain the phrase. A post having replies is still
 eligible if its own text matches. Quoted content, usernames, link previews and
 comment text are not used for matching; a quote post qualifies only if its own

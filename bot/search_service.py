@@ -1,3 +1,4 @@
+import re
 from html import escape
 from unicodedata import normalize
 
@@ -9,12 +10,12 @@ from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
 
 
 def matches_post_text(post: ThreadPost, query: str) -> bool:
-    """Require the literal phrase in a top-level post's own text."""
+    """Require every query word in a top-level post's own text, in any order."""
     if post.is_reply or not post.text:
         return False
-    phrase = " ".join(normalize("NFC", query).casefold().split())
-    text = " ".join(normalize("NFC", post.text).casefold().split())
-    return bool(phrase and phrase in text)
+    words = set(re.findall(r"\w+", normalize("NFC", query).casefold()))
+    text_words = set(re.findall(r"\w+", normalize("NFC", post.text).casefold()))
+    return bool(words and words <= text_words)
 
 
 class SearchService:
