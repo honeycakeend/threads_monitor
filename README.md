@@ -120,7 +120,10 @@ whose own `text` contains every query word, in any order. Additional words,
 punctuation and line breaks may appear between them: `ищу дизайнера` matches
 `ищу хорошего дизайнера` and `дизайнера для сайта ищу`. Matching uses whole words
 (Unicode word characters), ignores case, and normalizes Unicode to NFC.
-Word forms must match; it does not stem words or infer synonyms. Replies are
+Russian word forms are matched through a pinned local pymorphy3 dictionary:
+`ищу дизайнера` also matches `ищу дизайнеров` and `ищем дизайнеров`. Only known
+dictionary analyses are used; foreign words, identifiers and unknown words stay
+exact. It does not infer synonyms or match arbitrary word prefixes. Replies are
 excluded even when they contain the phrase. A post having replies is still
 eligible if its own text matches. Quoted content, usernames, link previews and
 comment text are not used for matching; a quote post qualifies only if its own
@@ -140,7 +143,10 @@ adding phrases preserve the current notification state.
 Opening `/start`, `/menu`, or the instructions installs a persistent bottom
 keyboard with **Меню / Menu** and **Инструкция / Instructions** buttons. These
 buttons open the panel and usage guide without typing commands. The keyboard
-is restored after input flows. Telegram clients can still hide it manually.
+is installed once per chat and language, with a persistent SQLite marker.
+Returning to the menu or finishing input does not resend the installation hint.
+Private input prompts keep the bottom keyboard; group input remains reply-scoped.
+Telegram clients can still hide it manually; `/start` explicitly reinstalls it.
 In groups, the keyboard uses Bot API's `force_reply` option so text-button
 messages are replies to the bot and can be delivered with privacy mode enabled.
 If an older client does not support that option, explicitly reply to a bot

@@ -426,6 +426,24 @@ class Database:
                 "language": str(row["language"]),
             }
 
+    async def get_navigation_keyboard_version(self, chat_id: int) -> str | None:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                "SELECT value FROM bot_settings WHERE key = ?",
+                (f"navigation_keyboard:{chat_id}",),
+            )
+            row = await cursor.fetchone()
+            return str(row["value"]) if row else None
+
+    async def set_navigation_keyboard_version(self, chat_id: int, version: str) -> None:
+        async with self.connection() as db:
+            await db.execute(
+                """INSERT INTO bot_settings (key, value) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                (f"navigation_keyboard:{chat_id}", version),
+            )
+            await db.commit()
+
     async def set_chat_language(self, chat_id: int, language: Language) -> None:
         async with self.connection() as db:
             await db.execute(

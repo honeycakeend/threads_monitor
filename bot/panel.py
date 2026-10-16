@@ -125,7 +125,14 @@ def navigation_keyboard(
     )
 
 
-async def send_navigation(message: Message, language: Language) -> None:
+async def send_navigation(
+    message: Message, language: Language, database: Database, *, force: bool = False
+) -> None:
+    version = f"{message.bot.id}:1:{language}:{message.chat.type}"
+    if not force and (
+        await database.get_navigation_keyboard_version(message.chat.id) == version
+    ):
+        return
     await message.answer(
         choose(
             language,
@@ -136,6 +143,7 @@ async def send_navigation(message: Message, language: Language) -> None:
             language, group=message.chat.type != ChatType.PRIVATE
         ),
     )
+    await database.set_navigation_keyboard_version(message.chat.id, version)
 
 
 def connection_key(account: dict | None) -> str:
@@ -452,7 +460,7 @@ def setup_panel_handlers(
         if reviewer_mode:
             await message.answer(REVIEW_HELP_TEXT[language])
             return
-        await send_navigation(message, language)
+        await send_navigation(message, language, database)
         await show(
             message,
             message.from_user.id,
@@ -470,7 +478,7 @@ def setup_panel_handlers(
         if reviewer_mode:
             await message.answer(REVIEW_HELP_TEXT[language])
             return
-        await send_navigation(message, language)
+        await send_navigation(message, language, database)
         await show(
             message,
             message.from_user.id,
@@ -608,7 +616,6 @@ def setup_panel_handlers(
                 text, rows = await panel.home(message, language)
                 screen = f"{notice}\n\n{text}", rows
         elif action == "home":
-            await send_navigation(message, language)
             screen = await panel.home(message, language)
         elif action == "instructions":
             screen = INSTRUCTIONS[language], back
@@ -740,7 +747,9 @@ def setup_panel_handlers(
             prompt = await message.answer(
                 f'<a href="tg://user?id={owner}">{escape(callback.from_user.first_name)}</a>, '
                 + prompt_text,
-                reply_markup=ForceReply(selective=True),
+                reply_markup=navigation_keyboard(language)
+                if message.chat.type == ChatType.PRIVATE
+                else ForceReply(selective=True),
                 parse_mode="HTML",
             )
             await state.set_state(input_state)
@@ -933,7 +942,6 @@ def setup_panel_handlers(
             )
         if current != PanelInput.search.state:
             await state.clear()
-        await send_navigation(message, language)
         text, rows = screen
         try:
             await message.bot.edit_message_text(

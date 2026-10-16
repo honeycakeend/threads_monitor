@@ -489,15 +489,17 @@ async def test_group_navigation_uses_replies_without_changing_privacy(app):
 
 
 @pytest.mark.asyncio
-async def test_bottom_keyboard_is_restored_after_input(app):
+async def test_input_keeps_bottom_keyboard_without_extra_hint_message(app):
+    await app.text("/menu")
+    app.session.requests.clear()
     await app.click("add")
+    prompt = app.last
+    assert isinstance(prompt.reply_markup, ReplyKeyboardMarkup)
+    assert prompt.reply_markup.is_persistent
     app.session.requests.clear()
     await app.text("designer")
-    assert any(
-        isinstance(request, SendMessage)
-        and isinstance(request.reply_markup, ReplyKeyboardMarkup)
-        for request in app.session.requests
-    )
+    assert isinstance(app.last, EditMessageText)
+    assert not any(isinstance(request, SendMessage) for request in app.session.requests)
 
 
 @pytest.mark.asyncio
@@ -589,3 +591,63 @@ async def test_can_start_oauth_after_group_selection_without_server_chat_setting
         target_chat_id=-200,
         language="ru",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [False, True])
+async def test_navigation_hint_not_repeated_by_buttons_or_entry_points(app, group):
+    await app.text("/menu", group=group)
+    hints = lambda: [
+        request
+        for request in app.session.requests
+        if isinstance(request, SendMessage)
+        and request.text == "Настройки и инструкция — на кнопках внизу чата."
+    ]
+    assert len(hints()) == 1
+    await app.click("phrases", group=group)
+    await app.click("home", group=group)
+    await app.text("Меню", group=group)
+    await app.text("Инструкция", group=group)
+    await app.click("home", group=group)
+    await app.text("/menu", group=group)
+    assert len(hints()) == 1
+    # Stored across Database instances/restarts; /start explicitly reinstalls it.
+    restarted = Database(app.db._path)
+    assert await restarted.get_navigation_keyboard_version(-100 if group else 7)
+    await app.text("/start", group=group)
+    assert len(hints()) == 2
+
+
+@pytest.mark.asyncio
+async def test_group_input_remains_reply_scoped_without_repeat_hint(app):
+    await app.text("/menu", group=True)
+    await app.click("add", group=True)
+    prompt_id = app.session.next_id
+    app.session.requests.clear()
+    await app.text("designer", group=True, reply_to=prompt_id)
+    assert isinstance(app.last, EditMessageText)
+    assert not any(isinstance(request, SendMessage) for request in app.session.requests)
+
+
+@pytest.mark.asyncio
+async def test_failed_keyboard_installation_is_retried(app, monkeypatch):
+    from aiogram.exceptions import TelegramNetworkError
+
+    original = app.session.make_request
+
+    async def fail_hint(bot, method, timeout=None):
+        if isinstance(method, SendMessage) and isinstance(
+            method.reply_markup, ReplyKeyboardMarkup
+        ):
+            raise TelegramNetworkError(
+                method=method, message="Temporary network failure"
+            )
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(app.session, "make_request", fail_hint)
+    with pytest.raises(TelegramNetworkError):
+        await app.text("/menu")
+    assert await app.db.get_navigation_keyboard_version(7) is None
+    monkeypatch.setattr(app.session, "make_request", original)
+    await app.text("/menu")
+    assert await app.db.get_navigation_keyboard_version(7)

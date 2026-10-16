@@ -34,9 +34,17 @@ from bot.watcher import SearchWatcher
         ("ищу дизайнера", "Резюме дизайнера", False, False),
         ("ищу дизайнера", "Неищу дизайнера", False, False),
         ("ищу дизайнера", "Ищу дизайнера123", False, False),
-        ("ищу дизайнера", "Ищу дизайнеров", False, False),
-        ("ищу дизайнера", "Ищу дизайнер", False, False),
+        ("ищу дизайнера", "Ищу дизайнеров", False, True),
+        ("ищу дизайнера", "Ищу дизайнер", False, True),
         ("!!!", "Любой пост!", False, False),
+        ("ищу дизайнера", "Ищем опытных дизайнеров", False, True),
+        ("ищу дизайнера", "Дизайнеры, ищет вас наша команда", False, True),
+        ("ищу дизайнера", "Ищу дизайнеров", True, False),
+        ("ищу дизайнера", "Ищу дизайнерский стул", False, False),
+        ("ищу дизайнера", "Ищу дизайн сайта", False, False),
+        ("проект", "Помогаю с проектами", False, True),
+        ("ищу дизайнера", "Неищу дизайнеров", False, False),
+        ("designer", "designers wanted", False, False),
     ],
 )
 def test_all_query_words_must_be_in_own_non_reply_text(query, text, is_reply, expected):
@@ -66,18 +74,22 @@ def api_posts():
         {"id": "empty", "has_replies": True},
         {"id": "extra-words", "text": "Ищу хорошего дизайнера"},
         {"id": "reordered", "text": "Дизайнера для сайта ищу"},
+        {"id": "plural", "text": "Ищу хороших дизайнеров"},
+        {"id": "verb-form", "text": "Ищем дизайнеров"},
+        {"id": "reply-plural", "text": "Ищем дизайнеров", "is_reply": True},
+        {"id": "related-word", "text": "Ищу дизайнерский стул"},
         {"id": "missing-word", "text": "Посоветуйте хорошего дизайнера"},
         {
             "id": "split-own-comment",
             "text": "Ищу специалиста",
             "has_replies": True,
-            "replies": {"data": [{"text": "дизайнера"}]},
+            "replies": {"data": [{"text": "дизайнеров"}]},
         },
         {
             "id": "split-own-quote",
             "text": "Ищу специалиста",
             "is_quote_post": True,
-            "quoted_post": {"text": "дизайнера"},
+            "quoted_post": {"text": "дизайнеров"},
         },
     ]
 
@@ -106,8 +118,10 @@ async def test_real_search_pipeline_filters_api_results_and_updates_total(sort):
         "own-quote-text",
         "extra-words",
         "reordered",
+        "plural",
+        "verb-form",
     ]
-    assert result.total == 5
+    assert result.total == 7
     assert len(requests) == 1
 
 
@@ -158,9 +172,9 @@ async def test_watcher_sends_matching_originals_and_does_not_mark_replies_seen(
         )
         stats = await watcher.run_once()
         repeat = await watcher.run_once()
-    assert stats.errors == 0 and stats.posts_sent == 5
+    assert stats.errors == 0 and stats.posts_sent == 7
     assert repeat.posts_sent == 0
-    assert bot.send_message.await_count == 5
+    assert bot.send_message.await_count == 7
     assert not await db.is_post_seen(phrase_id, "reply")
     assert not await db.is_post_seen(phrase_id, "comment-only")
     assert not await db.is_post_seen(phrase_id, "quote-only")

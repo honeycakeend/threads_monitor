@@ -262,3 +262,17 @@ Check cancellation, old confirmations, settings-only/reviewer/unauthorized users
 and missing sending permissions. Reconnect or change Threads and restart the bot:
 the selected group must remain the recipient. Use only designated test groups for
 this check, since confirmation redirects the shared production monitoring feed.
+
+### Word forms and quiet navigation
+
+Verify that `ищу дизайнера` accepts `ищу дизайнеров`, `ищем хороших дизайнеров`
+and reordered words in a post's own text. Replies, comment-only matches,
+quote-only matches and related words such as `дизайнерский` must be rejected.
+The local Russian dictionary dependency must be installed from requirements.
+
+After opening `/menu`, navigate between screens, return home, add a phrase,
+change the interval, and open the bottom Menu/Instructions buttons. The keyboard
+installation hint must not repeat. Private input prompts keep the persistent
+keyboard; group inputs must still require a reply to the designated prompt.
+A bot restart must retain the keyboard marker. `/start` explicitly reinstalls
+buttons; a failed installation must not suppress the next retry.

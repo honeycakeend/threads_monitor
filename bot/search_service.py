@@ -1,21 +1,18 @@
-import re
 from html import escape
-from unicodedata import normalize
 
 from bot.config import SearchMode, SearchType
 from bot.i18n import Language, choose
 from bot.models import SearchResult, ThreadPost
+from bot.text_matching import matches_words
 from bot.threads_client import ThreadsClient
 from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
 
 
 def matches_post_text(post: ThreadPost, query: str) -> bool:
-    """Require every query word in a top-level post's own text, in any order."""
+    """Require every query word (or its Russian forms) in the post's own text."""
     if post.is_reply or not post.text:
         return False
-    words = set(re.findall(r"\w+", normalize("NFC", query).casefold()))
-    text_words = set(re.findall(r"\w+", normalize("NFC", post.text).casefold()))
-    return bool(words and words <= text_words)
+    return matches_words(post.text, query)
 
 
 class SearchService:

@@ -293,7 +293,7 @@ def setup_handlers(
             await message.answer(REVIEW_HELP_TEXT[language])
             return
         await _remember_chat_language(message, database, language)
-        await send_navigation(message, language)
+        await send_navigation(message, language, database, force=True)
         text, rows = await panel.home(message, language)
         await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
 
