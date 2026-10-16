@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.methods import EditMessageText, GetChat, SendMessage
-from aiogram.types import Chat, Message, Update
+from aiogram.types import Chat, Message, ReplyKeyboardMarkup, Update
 from test_commands import MockTelegramSession, make_update
 
 from bot.config import settings
@@ -13,7 +13,7 @@ from bot.handlers import AccessMiddleware, setup_handlers
 from bot.models import SearchResult
 from bot.reviewer_access import ReviewerAccessService
 from bot.storage import Database, utc_now
-from bot.threads_oauth import ThreadsNotConnectedError
+from bot.threads_oauth import ThreadsNotConnectedError, ThreadsOAuthError
 from bot.watcher import WatcherStats
 
 
@@ -284,7 +284,13 @@ async def test_search_error_is_actionable(app):
 async def test_account_actions_require_admin_and_private_chat(app):
     await app.text("/menu", user=8)
     assert not any(button.text == "Подключение Threads" for button in app.buttons)
-    for action in ("account", "connect", "disconnect", "confirm_disconnect"):
+    for action in (
+        "account",
+        "connect",
+        "change_account",
+        "disconnect",
+        "confirm_disconnect",
+    ):
         await app.click(action, user=8, owner=8)
         await app.click(action, group=True)
     app.auth.disconnect.assert_not_awaited()
@@ -371,3 +377,107 @@ async def test_run_uses_watcher_and_reports_results(app):
     await app.click("run")
     app.watcher.run_once.assert_awaited_once()
     assert "Отправлено уведомлений: 2" in app.last.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "language,button", [("ru", "Сменить аккаунт"), ("en", "Change account")]
+)
+async def test_account_change_is_available_only_for_existing_connection(
+    app, language, button
+):
+    await app.click("account", language=language)
+    assert any(item.text == button for item in app.buttons)
+    app.auth.status.return_value = None
+    await app.click("account", language=language)
+    assert not any(item.text == button for item in app.buttons)
+
+
+@pytest.mark.asyncio
+async def test_account_change_starts_oauth_without_disconnecting_or_changing_settings(
+    app,
+):
+    await app.db.add_phrases(["designer"])
+    await app.db.set_poll_interval_minutes(45)
+    await app.db.set_monitoring(-100, False)
+    await app.click("change_account")
+    app.auth.create_authorization_url.assert_awaited_once_with(
+        telegram_user_id=7, target_chat_id=-100, language="ru"
+    )
+    oauth_message = next(
+        request
+        for request in reversed(app.session.requests)
+        if isinstance(request, SendMessage) and "Смена аккаунта Threads" in request.text
+    )
+    assert "только после успешной авторизации" in oauth_message.text
+    assert "проверьте имя профиля" in oauth_message.text
+    assert oauth_message.reply_markup.inline_keyboard[0][0].url.startswith(
+        "https://threads.net/oauth/authorize"
+    )
+    assert any(button.callback_data.endswith(":account") for button in app.buttons)
+    await app.click("account")
+    assert "@team" in app.last.text
+    app.auth.disconnect.assert_not_awaited()
+    assert (await app.db.list_phrases())[0]["phrase"] == "designer"
+    assert await app.db.get_poll_interval_minutes() == 45
+    assert not (await app.db.get_chat_settings(-100))["monitoring_enabled"]
+
+
+@pytest.mark.asyncio
+async def test_account_change_failure_preserves_current_account(app):
+    app.auth.create_authorization_url.side_effect = ThreadsOAuthError(
+        "Cannot start authorization"
+    )
+    await app.click("change_account")
+    assert "Не удалось начать подключение" in app.last.text
+    app.auth.disconnect.assert_not_awaited()
+    await app.click("account")
+    assert "@team" in app.last.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["/start", "/menu", "/instructions"])
+async def test_entry_points_install_persistent_bottom_buttons(app, command):
+    await app.text(command)
+    markup = next(
+        request.reply_markup
+        for request in app.session.requests
+        if isinstance(request, SendMessage)
+        and isinstance(request.reply_markup, ReplyKeyboardMarkup)
+    )
+    assert [button.text for button in markup.keyboard[0]] == ["Меню", "Инструкция"]
+    assert markup.is_persistent and markup.resize_keyboard
+    assert markup.one_time_keyboard is False
+    await app.text("Меню")
+    assert "Threads Monitor" in app.last.text
+    await app.text("Инструкция")
+    assert "Как сменить аккаунт" in app.last.text
+
+
+@pytest.mark.asyncio
+async def test_group_navigation_uses_replies_without_changing_privacy(app):
+    await app.text("/menu", group=True, language="en")
+    markup = next(
+        request.reply_markup
+        for request in app.session.requests
+        if isinstance(request, SendMessage)
+        and isinstance(request.reply_markup, ReplyKeyboardMarkup)
+    )
+    assert [button.text for button in markup.keyboard[0]] == ["Menu", "Instructions"]
+    assert markup.model_dump()["force_reply"] is True
+    await app.text("Menu", group=True, reply_to=101, language="en")
+    assert "Threads Monitor" in app.last.text
+    await app.text("Instructions", group=True, reply_to=101, language="en")
+    assert "Changing accounts" in app.last.text
+
+
+@pytest.mark.asyncio
+async def test_bottom_keyboard_is_restored_after_input(app):
+    await app.click("add")
+    app.session.requests.clear()
+    await app.text("designer")
+    assert any(
+        isinstance(request, SendMessage)
+        and isinstance(request.reply_markup, ReplyKeyboardMarkup)
+        for request in app.session.requests
+    )

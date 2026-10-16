@@ -14,7 +14,9 @@ from aiogram.types import (
     ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 
 from bot.config import SearchType, settings
@@ -57,6 +59,7 @@ LABELS = {
     "search": ("Найти публикации", "Find posts"),
     "account": ("Подключение Threads", "Threads connection"),
     "connect": ("Подключить Threads", "Connect Threads"),
+    "change_account": ("Сменить аккаунт", "Change account"),
     "disconnect": ("Отключить аккаунт", "Disconnect account"),
     "confirm_disconnect": ("Да, отключить", "Yes, disconnect"),
     "instructions": ("Инструкция", "Instructions"),
@@ -87,6 +90,38 @@ def is_admin(message: Message) -> bool:
         message.chat.type == ChatType.PRIVATE
         and message.from_user is not None
         and message.from_user.id in settings.threads_oauth_admin_user_ids
+    )
+
+
+def navigation_keyboard(
+    language: Language, *, group: bool = False
+) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=choose(language, ru="Меню", en="Menu")),
+                KeyboardButton(text=label("instructions", language)),
+            ]
+        ],
+        is_persistent=True,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        # Bot API 10.3: reply to this bot so group privacy mode can deliver
+        # text-button messages. Older aiogram versions serialize extra fields.
+        **({"force_reply": True} if group else {}),
+    )
+
+
+async def send_navigation(message: Message, language: Language) -> None:
+    await message.answer(
+        choose(
+            language,
+            ru="Настройки и инструкция — на кнопках внизу чата.",
+            en="Use the buttons below for settings and instructions.",
+        ),
+        reply_markup=navigation_keyboard(
+            language, group=message.chat.type != ChatType.PRIVATE
+        ),
     )
 
 
@@ -320,6 +355,7 @@ class SettingsPanel:
                 ),
             )
             rows = [[(label("connect", language), "connect")]] if expired else []
+            rows.append([(label("change_account", language), "change_account")])
             rows.append([(label("disconnect", language), "disconnect")])
         else:
             text += choose(
@@ -370,6 +406,7 @@ def setup_panel_handlers(
         if reviewer_mode:
             await message.answer(REVIEW_HELP_TEXT[language])
             return
+        await send_navigation(message, language)
         await show(
             message,
             message.from_user.id,
@@ -387,6 +424,7 @@ def setup_panel_handlers(
         if reviewer_mode:
             await message.answer(REVIEW_HELP_TEXT[language])
             return
+        await send_navigation(message, language)
         await show(
             message,
             message.from_user.id,
@@ -425,6 +463,7 @@ def setup_panel_handlers(
         if action in {
             "account",
             "connect",
+            "change_account",
             "disconnect",
             "confirm_disconnect",
         } and not is_admin(message):
@@ -442,6 +481,7 @@ def setup_panel_handlers(
             )
             return
         if action == "home":
+            await send_navigation(message, language)
             screen = await panel.home(message, language)
         elif action == "instructions":
             screen = INSTRUCTIONS[language], back
@@ -499,8 +539,13 @@ def setup_panel_handlers(
                 screen = await panel.home(message, language)
         elif action == "account":
             screen = await panel.account(language)
-        elif action == "connect":
-            connected = await connect(message)
+        elif action in {"connect", "change_account"}:
+            connected = (
+                await connect(message, switch_account=True)
+                if action == "change_account"
+                else await connect(message)
+            )
+            account_back = [[(label("account", language), "account")], *back]
             screen = (
                 choose(
                     language,
@@ -511,7 +556,7 @@ def setup_panel_handlers(
                     if connected
                     else "Could not start authorization. See the message below for details.",
                 ),
-                back,
+                account_back,
             )
         elif action == "disconnect":
             await state.set_state(PanelInput.disconnect)
@@ -761,6 +806,7 @@ def setup_panel_handlers(
             )
         if current != PanelInput.search.state:
             await state.clear()
+        await send_navigation(message, language)
         text, rows = screen
         try:
             await message.bot.edit_message_text(

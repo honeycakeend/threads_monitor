@@ -32,7 +32,13 @@ from bot.i18n import (
     language_from_code,
 )
 from bot.oauth_server import create_oauth_app
-from bot.panel import PanelInput, connection_key, keyboard, setup_panel_handlers
+from bot.panel import (
+    PanelInput,
+    connection_key,
+    keyboard,
+    send_navigation,
+    setup_panel_handlers,
+)
 from bot.reviewer_access import REVIEW_START_PREFIX, ReviewerAccessService
 from bot.search_service import SearchService, format_search_result
 from bot.storage import (
@@ -288,6 +294,7 @@ def setup_handlers(
             await message.answer(REVIEW_HELP_TEXT[language])
             return
         await _remember_chat_language(message, database, language)
+        await send_navigation(message, language)
         text, rows = await panel.home(message, language)
         await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
 
@@ -303,6 +310,7 @@ def setup_handlers(
     async def cmd_connect_threads(
         message: Message,
         reviewer_mode: bool = False,
+        switch_account: bool = False,
     ) -> bool:
         language = _message_language(message)
         if reviewer_mode:
@@ -366,8 +374,12 @@ def setup_handlers(
                     InlineKeyboardButton(
                         text=choose(
                             language,
-                            ru="Подключить Threads",
-                            en="Connect Threads",
+                            ru="Авторизовать другой аккаунт"
+                            if switch_account
+                            else "Подключить Threads",
+                            en="Authorize another account"
+                            if switch_account
+                            else "Connect Threads",
                         ),
                         url=url,
                     )
@@ -375,7 +387,16 @@ def setup_handlers(
             ]
         )
         await message.answer(
-            choose(
+            (
+                choose(
+                    language,
+                    ru="<b>Смена аккаунта Threads</b>\n\nОткройте ссылку и авторизуйте нужный аккаунт. Перед подтверждением проверьте имя профиля. Если открылся прежний аккаунт, переключитесь на нужный в браузере.\n\nТекущее подключение будет заменено только после успешной авторизации. Фразы, частота проверки и чат уведомлений сохранятся.\n\n",
+                    en="<b>Change Threads account</b>\n\nOpen the link and authorize the account you want to use. Check the profile name before confirming. If the previous account opens, switch accounts in your browser.\n\nThe current connection will be replaced only after successful authorization. Phrases, check frequency and the notification chat will be kept.\n\n",
+                )
+                if switch_account
+                else ""
+            )
+            + choose(
                 language,
                 ru="Нажмите кнопку и подтвердите доступ к аккаунту и поиску публикаций "
                 "на странице Threads. Одноразовая ссылка действует "

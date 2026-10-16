@@ -185,6 +185,8 @@ Business Verification is not always required to click Publish, but Advanced Acce
 4. Start adding phrases, then cancel without sending text. This must not add a phrase or enable notifications.
 5. As an OAuth administrator, open **Подключение Threads / Threads connection**. If the account is connected, open the disconnect confirmation and choose Cancel. The account must remain connected.
 6. These checks do not require running a search, changing the phrase list, pausing notifications, or disconnecting the account.
+7. After `/menu`, verify the bottom **Меню / Menu** and **Инструкция / Instructions** buttons remain available. Each must open the corresponding screen. Repeat in the primary group; button messages should reply to the bot, allowing privacy mode to stay enabled.
+8. As an OAuth administrator in a private chat, open **Подключение Threads → Сменить аккаунт / Threads connection → Change account**. Verify the authorization link and account-selection instructions appear. Return to the account screen without completing authorization: the current account must remain connected.
 
 ## 8. App Review evidence
 

@@ -120,6 +120,15 @@ recipient chat, tracked phrase count, check frequency, and notification state.
 The panel suggests the next setup step until the bot is ready. Opening it and
 adding phrases preserve the current notification state.
 
+Opening `/start`, `/menu`, or the instructions installs a persistent bottom
+keyboard with **Меню / Menu** and **Инструкция / Instructions** buttons. These
+buttons open the panel and usage guide without typing commands. The keyboard
+is restored after input flows. Telegram clients can still hide it manually.
+In groups, the keyboard uses Bot API's `force_reply` option so text-button
+messages are replies to the bot and can be delivered with privacy mode enabled.
+If an older client does not support that option, explicitly reply to a bot
+message with “Меню” / “Menu”, or use `/menu@bot_username` to reopen the panel.
+
 The panel provides phrase management (including multiple phrases, one per line,
 and paginated removal), check frequency presets/custom input, primary-chat
 notification controls, an immediate check, and recent/popular one-time search.
@@ -128,6 +137,13 @@ Use `/cancel` or the Cancel button to stop input. Input in progress is temporary
 and is cancelled when the bot restarts; saved settings remain in SQLite.
 
 Account controls appear only for OAuth administrators in private chats.
+**Подключение Threads → Сменить аккаунт / Threads connection → Change account**
+starts authorization for a replacement account without disconnecting the
+current account first. Verify the account name on the Threads page before
+confirming. If the browser opens the previous account, switch accounts there.
+After authorization, return to the connection screen to verify the new username.
+The previous connection is replaced only after successful authorization; phrases,
+check frequency, notification preferences, and the primary chat are preserved.
 Disconnecting the production account requires confirmation, including when
 using `/disconnect_threads`. A cancelled or outdated confirmation cannot
 disconnect a newly connected account. Meta reviewer access remains isolated

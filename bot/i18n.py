@@ -9,7 +9,7 @@ INSTRUCTIONS: dict[Language, str] = {
 Бот ищет публикации в Threads по вашим фразам и присылает новые совпадения в рабочий чат.
 
 <b>Для начала</b>
-Откройте /menu → подключите Threads → добавьте фразы → включите уведомления.
+Нажмите «Меню» внизу чата → подключите Threads → добавьте фразы → включите уведомления.
 Подключить аккаунт может администратор в личном чате с ботом.
 
 <b>Кнопки в меню</b>
@@ -18,17 +18,21 @@ INSTRUCTIONS: dict[Language, str] = {
 • <b>Включить / Приостановить уведомления</b> — управлять отправкой в указанный рабочий чат.
 • <b>Проверить сейчас</b> — запустить проверку всех сохранённых фраз.
 • <b>Найти публикации</b> — разовый поиск последних или популярных постов. Фраза не сохраняется.
-• <b>Подключение Threads</b> — подключить аккаунт, проверить его состояние или отключить его. Доступно администратору.
+• <b>Подключение Threads</b> — подключить, сменить или отключить аккаунт. Доступно администратору в личном чате.
+
+<b>Как сменить аккаунт</b>
+«Меню» → «Подключение Threads» → «Сменить аккаунт». Откройте ссылку, авторизуйте нужный аккаунт и проверьте имя профиля перед подтверждением. Если открылся прежний аккаунт, переключитесь на нужный в браузере.
+После подключения вернитесь в «Подключение Threads» и проверьте новый @username. Фразы и настройки сохранятся. Старое подключение работает до успешной авторизации нового.
 
 Список фраз и частота проверки общие для команды. При первой проверке бот запоминает существующие посты; уведомления приходят только о новых.
 
-Вернуться к настройкам: /menu. Эта инструкция: /instructions или сообщение «Инструкция».""",
+Вернуться к настройкам: кнопка «Меню». Эта инструкция: кнопка «Инструкция». Если нижние кнопки скрыты, раскройте клавиатуру значком рядом с полем ввода. Первый запуск: /start; также доступны /menu и /instructions.""",
     "en": """<b>How to use the bot</b>
 
 The bot searches Threads for your phrases and sends new matches to your work chat.
 
 <b>Getting started</b>
-Open /menu → connect Threads → add phrases → enable notifications.
+Tap Menu below → connect Threads → add phrases → enable notifications.
 An administrator connects the account in a private chat with the bot.
 
 <b>Menu buttons</b>
@@ -37,11 +41,15 @@ An administrator connects the account in a private chat with the bot.
 • <b>Enable / Pause notifications</b> — control delivery to the displayed work chat.
 • <b>Check now</b> — check all saved phrases immediately.
 • <b>Find posts</b> — search recent or popular posts once, without saving the phrase.
-• <b>Threads connection</b> — connect an account, check its status or disconnect it. Available to administrators.
+• <b>Threads connection</b> — connect, change or disconnect an account. Available to administrators in private chats.
+
+<b>Changing accounts</b>
+Menu → Threads connection → Change account. Open the link, authorize the account you want to use, and check the profile name before confirming. If the previous account opens, switch accounts in your browser.
+Return to Threads connection and check the new @username. Phrases and settings will be kept. The previous connection remains active until the new authorization succeeds.
 
 Phrases and check frequency are shared by the team. The first check remembers existing posts; notifications are sent only for newer matches.
 
-Settings: /menu. These instructions: /instructions or send “Instructions”.""",
+Settings: the Menu button. This guide: the Instructions button. If the bottom buttons are hidden, expand the keyboard using the icon next to the input field. First start: /start; /menu and /instructions are also available.""",
 }
 
 
