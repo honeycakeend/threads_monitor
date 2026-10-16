@@ -52,6 +52,23 @@ CREATE TABLE IF NOT EXISTS bot_settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS bot_users (
+    telegram_user_id INTEGER PRIMARY KEY CHECK (telegram_user_id > 0),
+    role TEXT NOT NULL CHECK (role IN ('operator', 'admin', 'blocked')),
+    username TEXT,
+    updated_by INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bot_access_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id INTEGER NOT NULL,
+    target_user_id INTEGER NOT NULL,
+    previous_role TEXT,
+    new_role TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS threads_oauth_states (
     state_hash TEXT PRIMARY KEY,
     telegram_user_id INTEGER NOT NULL,
@@ -311,6 +328,68 @@ class Database:
             if row is None:
                 return settings.poll_interval_minutes
             return int(row["value"])
+
+    async def get_bot_user(self, user_id: int) -> dict | None:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM bot_users WHERE telegram_user_id = ?", (user_id,)
+            )
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def list_bot_users(self) -> list[dict]:
+        async with self.connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM bot_users ORDER BY telegram_user_id"
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def remember_bot_username(self, user_id: int, username: str | None) -> None:
+        async with self.connection() as db:
+            await db.execute(
+                "UPDATE bot_users SET username = ? WHERE telegram_user_id = ?",
+                (username, user_id),
+            )
+            await db.commit()
+
+    async def set_bot_user_role(
+        self,
+        *,
+        actor_user_id: int,
+        target_user_id: int,
+        role: str,
+        expected_role: str | None,
+        fallback_role: str | None,
+    ) -> bool:
+        if role not in {"operator", "admin", "blocked"}:
+            raise ValueError("Unknown access role")
+        now = to_db_timestamp(utc_now())
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT role FROM bot_users WHERE telegram_user_id = ?",
+                (target_user_id,),
+            )
+            row = await cursor.fetchone()
+            previous = row["role"] if row else fallback_role
+            if previous != expected_role:
+                return False
+            await db.execute(
+                "INSERT INTO bot_users (telegram_user_id, role, updated_by, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(telegram_user_id) DO UPDATE SET role = excluded.role, updated_by = excluded.updated_by, updated_at = excluded.updated_at",
+                (target_user_id, role, actor_user_id, now),
+            )
+            await db.execute(
+                "INSERT INTO bot_access_audit (actor_user_id, target_user_id, previous_role, new_role, created_at) VALUES (?, ?, ?, ?, ?)",
+                (actor_user_id, target_user_id, previous, role, now),
+            )
+            if role != "admin":
+                await db.execute(
+                    "UPDATE threads_oauth_states SET consumed_at = ? WHERE telegram_user_id = ? AND purpose = 'primary' AND consumed_at IS NULL",
+                    (now, target_user_id),
+                )
+            await db.commit()
+            return True
 
     async def set_poll_interval_minutes(self, minutes: int) -> None:
         async with self.connection() as db:
@@ -747,6 +826,19 @@ class Database:
 
             # Version 1 intentionally has one active Threads account. Rows are retained
             # without credentials so the schema can later support multiple accounts.
+            cursor = await db.execute(
+                "SELECT role FROM bot_users WHERE telegram_user_id = ?",
+                (connected_by_telegram_user_id,),
+            )
+            access = await cursor.fetchone()
+            if (
+                access is not None
+                and access["role"] != "admin"
+                and connected_by_telegram_user_id not in settings.bot_owner_user_ids
+            ):
+                raise ValueError(
+                    "Threads administrator access was revoked during authorization"
+                )
             await db.execute(
                 """
                 UPDATE threads_accounts
@@ -941,7 +1033,9 @@ class Database:
                 """,
                 (threads_user_id,),
             )
-            reviewer_ids = [int(row["telegram_user_id"]) for row in await cursor.fetchall()]
+            reviewer_ids = [
+                int(row["telegram_user_id"]) for row in await cursor.fetchall()
+            ]
             cursor = await db.execute(
                 "DELETE FROM threads_review_accounts WHERE threads_user_id = ?",
                 (threads_user_id,),

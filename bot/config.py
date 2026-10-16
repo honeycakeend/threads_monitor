@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     allowed_user_ids_raw: str = Field(default="", validation_alias="ALLOWED_USER_IDS")
+    bot_owner_user_ids_raw: str = Field(
+        default="", validation_alias="BOT_OWNER_USER_IDS"
+    )
 
     threads_oauth_admin_user_ids_raw: str = Field(
         default="",
@@ -79,6 +82,11 @@ class Settings(BaseSettings):
     @property
     def allowed_user_ids(self) -> list[int]:
         return self._parse_id_list(self.allowed_user_ids_raw)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def bot_owner_user_ids(self) -> list[int]:
+        return self._parse_id_list(self.bot_owner_user_ids_raw)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

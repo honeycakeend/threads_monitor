@@ -26,6 +26,9 @@ INSTRUCTIONS: dict[Language, str] = {
 
 Список фраз и частота проверки общие для команды. При первой проверке бот запоминает существующие посты; уведомления приходят только о новых.
 
+<b>Доступ — для владельца</b>
+«Меню» → «Пользователи и доступ» → «Добавить пользователя» → числовой Telegram ID → права → «Сохранить права». «Настройки + Threads» разрешает менять аккаунт. Отзыв доступа — в карточке пользователя. Изменения действуют сразу.
+
 Вернуться к настройкам: кнопка «Меню». Эта инструкция: кнопка «Инструкция». Если нижние кнопки скрыты, раскройте клавиатуру значком рядом с полем ввода. Первый запуск: /start; также доступны /menu и /instructions.""",
     "en": """<b>How to use the bot</b>
 
@@ -48,6 +51,9 @@ Menu → Threads connection → Change account. Open the link, authorize the acc
 Return to Threads connection and check the new @username. Phrases and settings will be kept. The previous connection remains active until the new authorization succeeds.
 
 Phrases and check frequency are shared by the team. The first check remembers existing posts; notifications are sent only for newer matches.
+
+<b>Access — owner only</b>
+Menu → Users and access → Add user → numeric Telegram ID → role → Save access. Settings + Threads also permits account changes. Revoke access from the user's card. Changes take effect immediately.
 
 Settings: the Menu button. This guide: the Instructions button. If the bottom buttons are hidden, expand the keyboard using the icon next to the input field. First start: /start; /menu and /instructions are also available.""",
 }

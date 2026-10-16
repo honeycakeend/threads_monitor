@@ -19,6 +19,8 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from bot.access import AccessService
+from bot.access_panel import AccessPanel, setup_access_input
 from bot.config import SearchType, settings
 from bot.i18n import (
     INSTRUCTIONS,
@@ -58,6 +60,7 @@ LABELS = {
     "run": ("Проверить сейчас", "Check now"),
     "search": ("Найти публикации", "Find posts"),
     "account": ("Подключение Threads", "Threads connection"),
+    "access": ("Пользователи и доступ", "Users and access"),
     "connect": ("Подключить Threads", "Connect Threads"),
     "change_account": ("Сменить аккаунт", "Change account"),
     "disconnect": ("Отключить аккаунт", "Disconnect account"),
@@ -85,11 +88,11 @@ def keyboard(owner: int, rows: list[list[tuple[str, str]]]) -> InlineKeyboardMar
     )
 
 
-def is_admin(message: Message) -> bool:
+async def is_admin(message: Message, access: AccessService) -> bool:
     return (
         message.chat.type == ChatType.PRIVATE
         and message.from_user is not None
-        and message.from_user.id in settings.threads_oauth_admin_user_ids
+        and await access.can_manage_threads(message.from_user.id)
     )
 
 
@@ -154,6 +157,7 @@ class SettingsPanel:
     ) -> None:
         self.db = database
         self.auth = threads_auth
+        self.access = AccessService(database)
 
     async def target(self) -> tuple[dict | None, int | None]:
         account = await self.auth.status()
@@ -261,8 +265,14 @@ class SettingsPanel:
             ]
         )
         rows.extend([[(label(key, language), key)] for key in ("run", "search")])
-        if is_admin(message):
+        if await is_admin(message, self.access):
             rows.append([(label("account", language), "account")])
+        if (
+            message.chat.type == ChatType.PRIVATE
+            and message.from_user
+            and self.access.is_owner(message.from_user.id)
+        ):
+            rows.append([(label("access", language), "access")])
         rows.append([(label("instructions", language), "instructions")])
         return text, rows
 
@@ -392,6 +402,8 @@ def setup_panel_handlers(
                 disable_web_page_preview=True,
             )
 
+    access_panel = AccessPanel(panel.access, show)
+
     @dp.message(Command("menu", "settings", "cancel"))
     @dp.message(
         F.text.strip()
@@ -455,6 +467,9 @@ def setup_panel_handlers(
         message = callback.message.model_copy(update={"from_user": callback.from_user})
         owner = callback.from_user.id
         action = parts[2]
+        if action == "access" or action.startswith("access:"):
+            await access_panel.handle(message, owner, language, action, callback, state)
+            return
         previous = await state.get_data()
         previous_state = await state.get_state()
         await state.clear()
@@ -466,7 +481,7 @@ def setup_panel_handlers(
             "change_account",
             "disconnect",
             "confirm_disconnect",
-        } and not is_admin(message):
+        } and not await is_admin(message, panel.access):
             await show(
                 message,
                 owner,
@@ -820,4 +835,5 @@ def setup_panel_handlers(
         except TelegramBadRequest:
             await show(message, message.from_user.id, screen, edit=False)
 
+    setup_access_input(dp, access_panel)
     return panel

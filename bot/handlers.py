@@ -21,6 +21,7 @@ from aiogram.types import (
     TelegramObject,
 )
 
+from bot.access import AccessService
 from bot.config import SearchType, settings
 from bot.crypto import TokenCipher
 from bot.i18n import (
@@ -85,6 +86,7 @@ class AccessMiddleware(BaseMiddleware):
     ) -> None:
         self._reviewer_access = reviewer_access
         self._database = database
+        self._access = AccessService(database or Database())
 
     async def _remember_language(self, event: TelegramObject) -> None:
         if self._database is None or not isinstance(event, Message):
@@ -107,17 +109,13 @@ class AccessMiddleware(BaseMiddleware):
             state = data.get("state")
             if state is not None:
                 await state.clear()
-        allowed_users = set(settings.allowed_user_ids) | set(
-            settings.threads_oauth_admin_user_ids
-        )
-        if not allowed_users:
-            await self._remember_language(event)
-            return await handler(event, data)
-
         user = getattr(event, "from_user", None)
-        if user and user.id in allowed_users:
+        role = await self._access.role(user.id) if user else None
+        if role in {"owner", "admin", "operator"}:
             data["reviewer_mode"] = False
             await self._remember_language(event)
+            if self._database is not None:
+                await self._database.remember_bot_username(user.id, user.username)
             return await handler(event, data)
 
         if isinstance(event, CallbackQuery):
@@ -133,6 +131,15 @@ class AccessMiddleware(BaseMiddleware):
 
         if isinstance(event, Message) and user is not None:
             language = language_from_code(user.language_code)
+            if role == "blocked":
+                await event.answer(
+                    choose(
+                        language,
+                        ru="Доступ к боту отозван.",
+                        en="Your bot access has been revoked.",
+                    )
+                )
+                return None
             command, argument = _command_and_argument(event)
             if (event.text or "").strip().casefold() in {"инструкция", "instructions"}:
                 command = "instructions"
@@ -206,7 +213,7 @@ def _format_pool(phrases: list[dict], language: Language) -> str:
     return "\n".join(lines)
 
 
-async def _require_oauth_admin(message: Message) -> bool:
+async def _require_oauth_admin(message: Message, access: AccessService) -> bool:
     language = _message_language(message)
     if message.chat.type != ChatType.PRIVATE:
         await message.answer(
@@ -218,16 +225,7 @@ async def _require_oauth_admin(message: Message) -> bool:
         )
         return False
     user = message.from_user
-    if not settings.threads_oauth_admin_user_ids:
-        await message.answer(
-            choose(
-                language,
-                ru="Список администраторов OAuth не настроен на сервере.",
-                en="The OAuth administrator list is not configured on the server.",
-            )
-        )
-        return False
-    if user is None or user.id not in settings.threads_oauth_admin_user_ids:
+    if user is None or not await access.can_manage_threads(user.id):
         await message.answer(
             choose(
                 language,
@@ -248,6 +246,7 @@ def setup_handlers(
     threads_auth: ThreadsAuthService,
     reviewer_access: ReviewerAccessService | None = None,
 ) -> None:
+    access = AccessService(database)
     reviewer_access = reviewer_access or ReviewerAccessService(
         database=database,
         code_hash=settings.threads_review_access_code_hash,
@@ -323,7 +322,7 @@ def setup_handlers(
                     )
                 )
                 return False
-        elif not await _require_oauth_admin(message):
+        elif not await _require_oauth_admin(message, access):
             return False
         if not settings.threads_oauth_configured:
             await message.answer(
@@ -420,7 +419,7 @@ def setup_handlers(
                 return
             account = await threads_auth.review_status(message.from_user.id)
         else:
-            if not await _require_oauth_admin(message):
+            if not await _require_oauth_admin(message, access):
                 return
             account = await threads_auth.status()
         if account is None:
@@ -492,7 +491,7 @@ def setup_handlers(
                 )
             )
             return
-        if not await _require_oauth_admin(message):
+        if not await _require_oauth_admin(message, access):
             return
         account = await threads_auth.status()
         if not account:
@@ -996,8 +995,8 @@ def create_dispatcher(
     )
 
     dp = Dispatcher()
-    dp.message.middleware(AccessMiddleware(reviewer_access, database))
-    dp.callback_query.middleware(AccessMiddleware(reviewer_access, database))
+    dp.message.middleware(AccessMiddleware(reviewer_access, db))
+    dp.callback_query.middleware(AccessMiddleware(reviewer_access, db))
     setup_handlers(
         dp,
         search_service=search,

@@ -50,8 +50,7 @@ class MetaOAuthRequestError(ThreadsOAuthError):
         ]
         details = f"; {'; '.join(numeric_details)}" if numeric_details else ""
         super().__init__(
-            f"Meta rejected the OAuth request at {path} "
-            f"(HTTP {status_code}{details})"
+            f"Meta rejected the OAuth request at {path} (HTTP {status_code}{details})"
         )
 
 
@@ -372,15 +371,20 @@ class ThreadsAuthService:
                     "Temporary reviewer access expired during OAuth"
                 ) from exc
         elif purpose == PRIMARY_OAUTH_PURPOSE:
-            await self._db.upsert_threads_connection(
-                threads_user_id=profile.id,
-                username=profile.username,
-                access_token_encrypted=encrypted_token,
-                token_type=long_lived.token_type,
-                expires_at=expires_at,
-                connected_by_telegram_user_id=telegram_user_id,
-                target_chat_id=int(state["target_chat_id"]),
-            )
+            try:
+                await self._db.upsert_threads_connection(
+                    threads_user_id=profile.id,
+                    username=profile.username,
+                    access_token_encrypted=encrypted_token,
+                    token_type=long_lived.token_type,
+                    expires_at=expires_at,
+                    connected_by_telegram_user_id=telegram_user_id,
+                    target_chat_id=int(state["target_chat_id"]),
+                )
+            except ValueError as exc:
+                raise ThreadsOAuthError(
+                    "Threads administrator access was revoked during authorization"
+                ) from exc
             await self._db.set_chat_language(
                 int(state["target_chat_id"]),
                 language,
@@ -402,7 +406,9 @@ class ThreadsAuthService:
             raise InvalidOAuthStateError("OAuth state is invalid or expired")
         state = await self._db.consume_oauth_state(self.hash_state(raw_state))
         if state is None:
-            raise InvalidOAuthStateError("OAuth state is invalid, expired, or already used")
+            raise InvalidOAuthStateError(
+                "OAuth state is invalid, expired, or already used"
+            )
         return state
 
     async def status(self) -> dict | None:
@@ -427,9 +433,7 @@ class ThreadsAuthService:
     async def get_review_access_token(self, telegram_user_id: int) -> str:
         account = await self._db.get_review_threads_account(telegram_user_id)
         if account is None:
-            raise ThreadsNotConnectedError(
-                "Review Threads account is not connected"
-            )
+            raise ThreadsNotConnectedError("Review Threads account is not connected")
         expires_at = from_db_timestamp(account.get("expires_at"))
         if expires_at is None or expires_at <= utc_now():
             raise ThreadsNotConnectedError(
@@ -503,7 +507,9 @@ class ThreadsTokenManager:
 
             encrypted = account.get("access_token_encrypted")
             if encrypted is None:
-                raise ThreadsNotConnectedError("Threads account has no stored credential")
+                raise ThreadsNotConnectedError(
+                    "Threads account has no stored credential"
+                )
             current_token = self._cipher.decrypt(bytes(encrypted))
             refreshed = await self._oauth_client.refresh_long_lived_token(current_token)
             new_expires_at = utc_now() + timedelta(seconds=refreshed.expires_in)
@@ -594,7 +600,10 @@ def verify_meta_signed_request(signed_request: str, app_secret: str) -> dict[str
     ).digest()
     if not hmac.compare_digest(supplied_signature, expected_signature):
         raise InvalidSignedRequestError("Invalid signed request signature")
-    if not isinstance(payload, dict) or str(payload.get("algorithm", "")).upper() != "HMAC-SHA256":
+    if (
+        not isinstance(payload, dict)
+        or str(payload.get("algorithm", "")).upper() != "HMAC-SHA256"
+    ):
         raise InvalidSignedRequestError("Unsupported signed request algorithm")
     user_id = payload.get("user_id")
     if (

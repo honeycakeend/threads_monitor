@@ -156,6 +156,31 @@ Use the **Инструкция / Instructions** button, `/instructions`, or send
 button, how to start, the shared team settings, and why the first monitoring
 check does not send existing posts. `/help` retains the detailed command list.
 
+### Manage access without server edits
+
+Set `BOT_OWNER_USER_IDS` once to the protected owner's numeric Telegram ID(s).
+Only those owners see **Пользователи и доступ / Users and access** in a private
+chat. Existing OAuth administrators are not automatically owners.
+
+Use **Menu → Users and access → Add user**, enter a numeric Telegram ID, choose
+**Settings** or **Settings + Threads**, then confirm **Save access**. The latter
+allows connecting, changing, and disconnecting the shared Threads account.
+Neither role can grant access to other people. Open an existing user's card to
+change their role or revoke access. Owner rights cannot be changed in the bot.
+
+Roles are persisted in SQLite and apply immediately, without a restart. Existing
+`ALLOWED_USER_IDS` and `THREADS_OAUTH_ADMIN_USER_IDS` entries remain visible as
+fallback roles; a saved role or revocation overrides them. An empty access
+configuration does not make the bot public. Revoked users cannot bypass the
+restriction with a Meta review link. Downgrading or revoking an administrator
+invalidates their pending production OAuth links and prevents an in-flight
+authorization from replacing the shared account. Already connected Threads
+accounts remain connected until explicitly disconnected.
+
+Access changes are recorded in `bot_access_audit` with the actor, target, old/new
+role, and timestamp. The owner ID list remains server-configured for recovery;
+normal user access no longer requires editing `.env`.
+
 The bot reads Telegram's `language_code` on every incoming command. Codes `ru`
 and `ru-*` receive Russian text; every other code, including a missing value,
 receives English. This applies to help, validation/errors, status, search
