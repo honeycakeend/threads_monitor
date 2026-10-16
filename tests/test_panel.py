@@ -257,17 +257,21 @@ async def test_cancel_and_commands_clear_pending_input(app):
 
 
 @pytest.mark.asyncio
-async def test_interval_retries_invalid_input_and_saves_valid_value(app):
-    await app.click("custom")
-    for value in ("abc", "0", "999", "³"):
-        await app.text(value)
-        assert "целое число" in app.last.text
-    await app.text("45")
-    assert await app.db.get_poll_interval_minutes() == 45
+async def test_interval_only_accepts_supported_presets(app):
+    await app.click("interval")
+    assert [
+        b.callback_data.rsplit(":", 1)[-1]
+        for b in app.buttons
+        if ":every:" in b.callback_data
+    ] == ["10", "30", "60", "120", "240"]
+    for value in ("abc", "0", "5", "15", "45", "999", "³"):
+        await app.click(f"every:{value}")
+        assert "Выберите интервал кнопкой" in app.last.text
+        assert await app.db.get_poll_interval_minutes() == 30
+    await app.click("every:60")
+    assert await app.db.get_poll_interval_minutes() == 60
     assert "Сохранено" in app.last.text
-    await app.click("every:30")
-    assert await app.db.get_poll_interval_minutes() == 30
-    assert any(button.text == "✓ 30 мин" for button in app.buttons)
+    assert any(button.text == "✓ 60 мин" for button in app.buttons)
 
 
 @pytest.mark.asyncio
@@ -636,24 +640,15 @@ async def test_navigation_hint_not_repeated_by_buttons_or_entry_points(app, grou
 
 
 @pytest.mark.asyncio
-async def test_group_custom_interval_opens_private_step_and_accepts_plain_number(app):
-    await app.text("/menu", group=True)
-    app.session.requests.clear()
+async def test_old_custom_interval_buttons_and_links_open_presets(app):
     await app.click("custom", group=True)
-    assert not any(isinstance(r, SendMessage) for r in app.session.requests)
-    assert any(b.url and "start=input_interval" in b.url for b in app.buttons)
-    await app.text("5", group=True)
-    assert await app.db.get_poll_interval_minutes() != 5
+    assert not any(b.url for b in app.buttons)
+    assert not any(b.text == "Указать свой интервал" for b in app.buttons)
     await app.text("/start input_interval")
-    assert (
-        app.last.reply_markup.input_field_placeholder
-        == "Интервал в минутах, например 5"
-    )
-    await app.text("5")
-    assert await app.db.get_poll_interval_minutes() == 5
-    app.watcher.reschedule.assert_awaited_once()
-    await app.text("/menu", group=True)
-    assert "каждые 5 мин" in app.last.text
+    assert any(b.text == "10 мин" for b in app.buttons)
+    await app.text("45")
+    assert await app.db.get_poll_interval_minutes() == 30
+    app.watcher.reschedule.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -681,14 +676,15 @@ async def test_failed_keyboard_installation_is_retried(app, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_five_minutes_is_a_direct_group_button_and_wakes_scheduler(app):
+async def test_ten_minutes_is_a_direct_group_button_and_wakes_scheduler(app):
     await app.click("interval", group=True)
     assert any(
-        b.text == "5 мин" and b.callback_data.endswith(":every:5") for b in app.buttons
+        b.text == "10 мин" and b.callback_data.endswith(":every:10")
+        for b in app.buttons
     )
-    await app.click("every:5", group=True)
-    assert await app.db.get_poll_interval_minutes() == 5
-    assert any(b.text == "✓ 5 мин" for b in app.buttons)
+    await app.click("every:10", group=True)
+    assert await app.db.get_poll_interval_minutes() == 10
+    assert any(b.text == "✓ 10 мин" for b in app.buttons)
     app.watcher.reschedule.assert_awaited_once()
 
 
@@ -731,6 +727,6 @@ async def test_status_and_monitor_use_work_group_from_private_chat(app):
 
 @pytest.mark.asyncio
 async def test_interval_command_wakes_scheduler(app):
-    await app.text("/interval 5")
-    assert await app.db.get_poll_interval_minutes() == 5
+    await app.text("/interval 10")
+    assert await app.db.get_poll_interval_minutes() == 10
     app.watcher.reschedule.assert_awaited_once()

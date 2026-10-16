@@ -11,7 +11,7 @@ INSTRUCTIONS: dict[Language, str] = {
 <b>Для начала</b>
 Нажмите «Меню» внизу чата → подключите Threads → добавьте фразы → включите уведомления.
 Подключить аккаунт может администратор в личном чате с ботом.
-Для ввода фраз или своего интервала в группе нажмите «Ввести в личном чате». Готовые интервалы выбираются сразу кнопками.
+Для ввода фраз в группе нажмите «Ввести в личном чате». Частота проверки выбирается кнопками: 10, 30, 60, 120 или 240 минут.
 
 <b>Кнопки в меню</b>
 • <b>Фразы для отслеживания</b> — добавить или удалить слова и фразы, которые нужно искать. Например: «ищу дизайнера» найдёт и «ищу хороших дизайнеров». Формы русских слов учитываются; все слова должны быть в самом посте.
@@ -41,7 +41,7 @@ The bot finds your phrases in the text of Threads posts, excluding replies, and 
 <b>Getting started</b>
 Tap Menu below → connect Threads → add phrases → enable notifications.
 An administrator connects the account in a private chat with the bot.
-For typed input from a group, tap Enter in private chat. Preset intervals apply directly.
+For phrase input from a group, tap Enter in private chat. Choose a check interval of 10, 30, 60, 120 or 240 minutes with a button.
 
 <b>Menu buttons</b>
 • <b>Tracked phrases</b> — add or remove words and phrases to search for. All query words must be in the post itself; extra words are allowed. Russian word forms are matched automatically.

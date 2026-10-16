@@ -44,8 +44,7 @@ from bot.panel import (
 from bot.reviewer_access import REVIEW_START_PREFIX, ReviewerAccessService
 from bot.search_service import SearchService, format_search_result
 from bot.storage import (
-    MAX_POLL_INTERVAL_MINUTES,
-    MIN_POLL_INTERVAL_MINUTES,
+    POLL_INTERVAL_OPTIONS,
     Database,
     format_interval_advice,
     split_phrases,
@@ -294,6 +293,12 @@ def setup_handlers(
             await message.answer(REVIEW_HELP_TEXT[language])
             return
         await _remember_chat_language(message, database, language)
+        if start_parameter == "input_interval":
+            text, rows = await panel.interval(language)
+            await message.answer(
+                text, reply_markup=keyboard(message.from_user.id, rows)
+            )
+            return
         if start_parameter in INPUT_START_ACTIONS:
             await panel.begin_input(
                 message,
@@ -763,33 +768,24 @@ def setup_handlers(
             )
             return
 
-        if not raw.isdigit():
-            await message.answer(
+        if (
+            not raw.isascii()
+            or not raw.isdigit()
+            or int(raw) not in POLL_INTERVAL_OPTIONS
+        ):
+            text, rows = await panel.interval(
+                language,
                 choose(
                     language,
-                    ru=f"Укажите интервал в минутах "
-                    f"({MIN_POLL_INTERVAL_MINUTES}–{MAX_POLL_INTERVAL_MINUTES}):\n"
-                    "/interval 30",
-                    en=f"Enter an interval in minutes "
-                    f"({MIN_POLL_INTERVAL_MINUTES}–{MAX_POLL_INTERVAL_MINUTES}):\n"
-                    "/interval 30",
-                )
+                    ru="Выберите интервал кнопкой: 10, 30, 60, 120 или 240 минут.",
+                    en="Choose an interval below: 10, 30, 60, 120 or 240 minutes.",
+                ),
+            )
+            await message.answer(
+                text, reply_markup=keyboard(message.from_user.id, rows)
             )
             return
-
         minutes = int(raw)
-        if not MIN_POLL_INTERVAL_MINUTES <= minutes <= MAX_POLL_INTERVAL_MINUTES:
-            await message.answer(
-                choose(
-                    language,
-                    ru=f"Интервал должен быть от {MIN_POLL_INTERVAL_MINUTES} до "
-                    f"{MAX_POLL_INTERVAL_MINUTES} минут.",
-                    en=f"The interval must be between {MIN_POLL_INTERVAL_MINUTES} and "
-                    f"{MAX_POLL_INTERVAL_MINUTES} minutes.",
-                )
-            )
-            return
-
         await database.set_poll_interval_minutes(minutes)
         await watcher.reschedule()
         await message.answer(

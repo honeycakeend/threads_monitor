@@ -35,8 +35,7 @@ from bot.i18n import (
 )
 from bot.search_service import SearchService, format_search_result
 from bot.storage import (
-    MAX_POLL_INTERVAL_MINUTES,
-    MIN_POLL_INTERVAL_MINUTES,
+    POLL_INTERVAL_OPTIONS,
     Database,
     format_interval_advice,
     split_phrases,
@@ -49,7 +48,6 @@ from bot.watcher import SearchWatcher
 
 class PanelInput(StatesGroup):
     phrases = State()
-    interval = State()
     search = State()
     search_type = State()
     disconnect = State()
@@ -58,7 +56,6 @@ class PanelInput(StatesGroup):
 
 INPUT_START_ACTIONS = {
     "input_add": "add",
-    "input_interval": "custom",
     "input_search": "search",
 }
 
@@ -69,7 +66,6 @@ LABELS = {
     "phrases": ("Фразы для отслеживания", "Tracked phrases"),
     "add": ("+ Добавить фразы", "+ Add phrases"),
     "interval": ("Частота проверки", "Check frequency"),
-    "custom": ("Указать свой интервал", "Custom interval"),
     "private_input": ("Ввести в личном чате", "Enter in private chat"),
     "run": ("Проверить сейчас", "Check now"),
     "search": ("Найти публикации", "Find posts"),
@@ -407,10 +403,6 @@ class SettingsPanel:
                 "Пришлите фразы для отслеживания — каждую с новой строки. Например:\nищу дизайнера\nнужен сайт",
                 "Send phrases to track, one per line. For example:\nlooking for a designer\nneed a website",
             ),
-            "custom": (
-                f"Пришлите интервал в минутах: от {MIN_POLL_INTERVAL_MINUTES} до {MAX_POLL_INTERVAL_MINUTES}.",
-                f"Send an interval in minutes: {MIN_POLL_INTERVAL_MINUTES}–{MAX_POLL_INTERVAL_MINUTES}.",
-            ),
             "search": (
                 "Пришлите слово или фразу для разового поиска. В список отслеживания она не попадёт.",
                 "Send a word or phrase for a one-time search. It will not be added to tracked phrases.",
@@ -418,7 +410,6 @@ class SettingsPanel:
         }
         placeholders = {
             "add": ("Фразы — каждая с новой строки", "One phrase per line"),
-            "custom": ("Интервал в минутах, например 5", "Minutes, e.g. 5"),
             "search": ("Слово или фраза для поиска", "Search word or phrase"),
         }
         text = prompts[action][0 if language == "ru" else 1]
@@ -442,7 +433,6 @@ class SettingsPanel:
         await state.set_state(
             {
                 "add": PanelInput.phrases,
-                "custom": PanelInput.interval,
                 "search": PanelInput.search,
             }[action]
         )
@@ -469,11 +459,10 @@ class SettingsPanel:
                 )
                 for value in values
             ]
-            for values in ((5, 10, 15), (30, 60), (120, 240))
+            for values in (POLL_INTERVAL_OPTIONS[:3], POLL_INTERVAL_OPTIONS[3:])
         ]
         rows.extend(
             [
-                [(label("custom", language), "custom")],
                 [(label("home", language), "home")],
             ]
         )
@@ -730,24 +719,28 @@ def setup_panel_handlers(
                 en="Phrase removed." if phrase else "Phrase already removed.",
             )
             screen = await panel.phrases(language, int(page), notice)
-        elif action == "interval" or action.startswith("every:"):
+        elif action in {"interval", "custom"} or action.startswith("every:"):
             notice = ""
             if action.startswith("every:"):
                 value = action.partition(":")[2]
                 if (
-                    not value.isdigit()
-                    or not MIN_POLL_INTERVAL_MINUTES
-                    <= int(value)
-                    <= MAX_POLL_INTERVAL_MINUTES
+                    value.isascii()
+                    and value.isdigit()
+                    and int(value) in POLL_INTERVAL_OPTIONS
                 ):
-                    return
-                await database.set_poll_interval_minutes(int(value))
-                await watcher.reschedule()
-                notice = choose(
-                    language,
-                    ru="Сохранено. Следующая проверка будет по новому интервалу.",
-                    en="Saved. The next check uses the new interval.",
-                )
+                    await database.set_poll_interval_minutes(int(value))
+                    await watcher.reschedule()
+                    notice = choose(
+                        language,
+                        ru="Сохранено. Следующая проверка будет по новому интервалу.",
+                        en="Saved. The next check uses the new interval.",
+                    )
+                else:
+                    notice = choose(
+                        language,
+                        ru="Выберите интервал кнопкой: 10, 30, 60, 120 или 240 минут.",
+                        en="Choose an interval below: 10, 30, 60, 120 or 240 minutes.",
+                    )
             screen = await panel.interval(language, notice)
         elif action.startswith("notify:"):
             account, target = await panel.target()
@@ -815,7 +808,7 @@ def setup_panel_handlers(
             ):
                 await threads_auth.disconnect()
             screen = await panel.account(language)
-        elif action in {"add", "custom", "search"}:
+        elif action in {"add", "search"}:
             await panel.begin_input(message, owner, language, action, state)
             return
         elif action in {"recent", "top"}:
@@ -910,7 +903,6 @@ def setup_panel_handlers(
         await show(message, owner, screen)
 
     @dp.message(PanelInput.phrases, F.text, ~F.text.startswith("/"))
-    @dp.message(PanelInput.interval, F.text, ~F.text.startswith("/"))
     @dp.message(PanelInput.search, F.text, ~F.text.startswith("/"))
     async def accept_input(message: Message, state: FSMContext):
         language = language_from_code(message.from_user.language_code)
@@ -931,33 +923,7 @@ def setup_panel_handlers(
                 )
             )
             return
-        if current == PanelInput.interval.state:
-            if (
-                not raw.isascii()
-                or not raw.isdigit()
-                or not MIN_POLL_INTERVAL_MINUTES
-                <= int(raw)
-                <= MAX_POLL_INTERVAL_MINUTES
-            ):
-                await message.answer(
-                    choose(
-                        language,
-                        ru=f"Нужно целое число от {MIN_POLL_INTERVAL_MINUTES} до {MAX_POLL_INTERVAL_MINUTES}. Попробуйте ещё раз или нажмите /cancel.",
-                        en=f"Enter a whole number from {MIN_POLL_INTERVAL_MINUTES} to {MAX_POLL_INTERVAL_MINUTES}. Try again or use /cancel.",
-                    )
-                )
-                return
-            await database.set_poll_interval_minutes(int(raw))
-            await watcher.reschedule()
-            screen = await panel.interval(
-                language,
-                choose(
-                    language,
-                    ru="Сохранено. Следующая проверка будет по новому интервалу.",
-                    en="Saved. The next check uses the new interval.",
-                ),
-            )
-        elif current == PanelInput.phrases.state:
+        if current == PanelInput.phrases.state:
             phrases = split_phrases(raw)
             if (
                 not phrases

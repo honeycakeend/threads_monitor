@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     default_search_type: SearchType = SearchType.RECENT
     default_search_limit: int = 25
-    poll_interval_minutes: int = 15
+    poll_interval_minutes: int = 30
     threads_api_debug: bool = False
 
     @computed_field  # type: ignore[prop-decorator]

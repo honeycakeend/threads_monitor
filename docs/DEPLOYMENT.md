@@ -274,8 +274,8 @@ After opening `/menu`, navigate between screens, return home, add a phrase,
 change the interval, and open the bottom Menu/Instructions buttons. The keyboard
 installation hint must not repeat. Private input prompts keep the persistent
 keyboard; group input buttons open the matching step privately. Verify that
-5/10-minute preset buttons save directly and wake the scheduler, while a custom
-interval opens a private input step and accepts a plain number there.
+only 10/30/60/120/240-minute buttons appear and wake the scheduler. Old custom
+interval buttons and links open the presets; unsupported values cannot be saved.
 A bot restart must retain the keyboard marker. `/start` explicitly reinstalls
 buttons; a failed installation must not suppress the next retry.
 

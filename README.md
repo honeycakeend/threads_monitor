@@ -154,10 +154,10 @@ If an older client does not support that option, explicitly reply to a bot
 message with “Меню” / “Menu”, or use `/menu@bot_username` to reopen the panel.
 
 The panel provides phrase management (including multiple phrases, one per line,
-and paginated removal), check frequency presets/custom input, primary-chat
+and paginated removal), five check frequency presets, primary-chat
 notification controls, an immediate check, and recent/popular one-time search.
-Settings screens update in place. Presets (including 5 and 10 minutes) apply
-directly in groups; typed phrases, custom intervals and one-time searches open
+Settings screens update in place. The only intervals are 10, 30, 60, 120 and 240 minutes, selected directly
+in groups. Typed phrases and one-time searches open
 the corresponding private input step. Group conversation is never captured as
 settings input.
 Use `/cancel` or the Cancel button to stop input. Input in progress is temporary
@@ -241,7 +241,7 @@ chat when an administrator connects Threads or uses a monitoring command there.
 - `/pool` — list monitored phrases
 - `/remove <id or phrase>` — remove a phrase
 - `/monitor on|off` — enable or disable notifications
-- `/interval [minutes]` — view or update the polling interval
+- `/interval [minutes]` — view or select 10, 30, 60, 120 or 240 minutes
 - `/run` — check the monitoring pool immediately
 - `/status` — show operational status
 
