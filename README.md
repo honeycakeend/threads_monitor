@@ -38,6 +38,12 @@ OAuth state is valid for 10 minutes by default and can be used once. Creating a 
 
 Token request shapes follow Meta's [Threads access-token documentation](https://developers.facebook.com/docs/threads/get-started/get-access-tokens-and-permissions/), [long-lived token guide](https://developers.facebook.com/docs/threads/get-started/long-lived-tokens/), and the official [Meta Threads API Postman collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api).
 
+The refresh endpoint requires the long-lived token in the `access_token` query
+parameter alongside `grant_type=th_refresh_token`. Sending only a bearer header
+can be rejected with HTTP 500 / code 100 (missing `access_token`), even while
+profile and search requests succeed. HTTPX URL logging remains disabled, and
+OAuth errors expose only the endpoint and numeric provider codes.
+
 ## Requirements
 
 - Python 3.11+

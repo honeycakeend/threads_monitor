@@ -167,8 +167,10 @@ class ThreadsOAuthClient:
             "/refresh_access_token",
             params={
                 "grant_type": "th_refresh_token",
+                # This endpoint requires the explicit parameter even though
+                # profile/search endpoints accept OAuth bearer headers.
+                "access_token": access_token,
             },
-            headers={"Authorization": f"Bearer {access_token}"},
         )
         return self._parse_long_lived_token(response)
 

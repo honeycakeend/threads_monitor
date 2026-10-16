@@ -1,3 +1,4 @@
+import traceback
 from urllib.parse import parse_qs
 
 import httpx
@@ -41,8 +42,8 @@ async def test_oauth_client_uses_documented_exchange_and_refresh_requests():
             )
         if request.url.path == "/refresh_access_token":
             assert request.url.params["grant_type"] == "th_refresh_token"
-            assert "access_token" not in request.url.params
-            assert request.headers["authorization"] == "Bearer long-token"
+            assert request.url.params["access_token"] == "long-token"
+            assert "authorization" not in request.headers
             return httpx.Response(
                 200,
                 json={
@@ -144,3 +145,54 @@ async def test_long_lived_exchange_retries_observed_meta_transport_rejection():
 
     assert token.access_token == "long-token"
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_provider_error_does_not_expose_token(caplog):
+    token = "private-long-lived-token"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["access_token"] == token
+        return httpx.Response(
+            500,
+            json={"error": {"code": 100, "message": f"Rejected token {token}"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = ThreadsOAuthClient(
+            app_id="app-id",
+            app_secret="app-secret",
+            redirect_uri="https://example.test/callback",
+            http_client=http_client,
+        )
+        with pytest.raises(ThreadsOAuthError) as exc_info:
+            await client.refresh_long_lived_token(token)
+
+    assert str(exc_info.value) == (
+        "Meta rejected the OAuth request at /refresh_access_token (HTTP 500; code=100)"
+    )
+    assert token not in str(exc_info.value)
+    assert token not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_refresh_network_error_hides_sensitive_request_url():
+    token = "private-long-lived-token"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"Request failed: {request.url}", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = ThreadsOAuthClient(
+            app_id="app-id",
+            app_secret="app-secret",
+            redirect_uri="https://example.test/callback",
+            http_client=http_client,
+        )
+        with pytest.raises(ThreadsOAuthError) as exc_info:
+            await client.refresh_long_lived_token(token)
+
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    assert str(exc_info.value) == "Could not reach the Meta OAuth service"
+    assert token not in formatted
+    assert "access_token=" not in formatted
