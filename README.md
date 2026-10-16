@@ -145,7 +145,8 @@ keyboard with **Меню / Menu** and **Инструкция / Instructions** bu
 buttons open the panel and usage guide without typing commands. The keyboard
 is installed once per chat and language, with a persistent SQLite marker.
 Returning to the menu or finishing input does not resend the installation hint.
-Private input prompts keep the bottom keyboard; group input remains reply-scoped.
+Private input prompts keep the bottom keyboard. Group buttons that need typed
+input open a private-chat deep link to that exact input step.
 Telegram clients can still hide it manually; `/start` explicitly reinstalls it.
 In groups, the keyboard uses Bot API's `force_reply` option so text-button
 messages are replies to the bot and can be delivered with privacy mode enabled.
@@ -155,9 +156,15 @@ message with “Меню” / “Menu”, or use `/menu@bot_username` to reopen 
 The panel provides phrase management (including multiple phrases, one per line,
 and paginated removal), check frequency presets/custom input, primary-chat
 notification controls, an immediate check, and recent/popular one-time search.
-Settings screens update in place; input prompts support replies in groups.
+Settings screens update in place. Presets (including 5 and 10 minutes) apply
+directly in groups; typed phrases, custom intervals and one-time searches open
+the corresponding private input step. Group conversation is never captured as
+settings input.
 Use `/cancel` or the Cancel button to stop input. Input in progress is temporary
 and is cancelled when the bot restarts; saved settings remain in SQLite.
+Use Refresh menu (or `/status`) to reread settings changed in another chat.
+`/status`, `/monitor` and `/run` all use the selected work chat, including when
+called privately. Interval changes recalculate the current scheduler wait.
 
 Account controls appear only for OAuth administrators in private chats.
 **Подключение Threads → Сменить аккаунт / Threads connection → Change account**

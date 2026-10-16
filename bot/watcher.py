@@ -40,6 +40,7 @@ class SearchWatcher:
         self._token_manager = token_manager
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self._reschedule = asyncio.Event()
 
     async def start(self) -> None:
         if self._task is not None:
@@ -58,6 +59,10 @@ class SearchWatcher:
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+    async def reschedule(self) -> None:
+        """Wake the scheduler to recalculate an existing wait after a setting change."""
+        self._reschedule.set()
 
     async def run_once(self) -> WatcherStats:
         stats = WatcherStats()
@@ -107,11 +112,19 @@ class SearchWatcher:
             except Exception:
                 logger.exception("Watcher cycle failed")
 
+            await self._wait_for_next_cycle()
+
+    async def _wait_for_next_cycle(self) -> None:
+        loop = asyncio.get_running_loop()
+        finished_at = loop.time()
+        while not self._stop.is_set():
             interval_seconds = (await self._db.get_poll_interval_minutes()) * 60
+            delay = max(0, finished_at + interval_seconds - loop.time())
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=interval_seconds)
+                await asyncio.wait_for(self._reschedule.wait(), timeout=delay)
             except asyncio.TimeoutError:
-                continue
+                return
+            self._reschedule.clear()
 
     async def _process_phrase(
         self,

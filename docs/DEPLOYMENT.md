@@ -273,6 +273,12 @@ The local Russian dictionary dependency must be installed from requirements.
 After opening `/menu`, navigate between screens, return home, add a phrase,
 change the interval, and open the bottom Menu/Instructions buttons. The keyboard
 installation hint must not repeat. Private input prompts keep the persistent
-keyboard; group inputs must still require a reply to the designated prompt.
+keyboard; group input buttons open the matching step privately. Verify that
+5/10-minute preset buttons save directly and wake the scheduler, while a custom
+interval opens a private input step and accepts a plain number there.
 A bot restart must retain the keyboard marker. `/start` explicitly reinstalls
 buttons; a failed installation must not suppress the next retry.
+
+Verify `/status` and `/monitor on|off` always refer to the selected notification
+group from both private and group chats. Refresh menu must reread settings saved
+elsewhere. Changing the interval must recalculate an ongoing scheduler wait.

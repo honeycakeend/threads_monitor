@@ -34,6 +34,7 @@ from bot.i18n import (
 )
 from bot.oauth_server import create_oauth_app
 from bot.panel import (
+    INPUT_START_ACTIONS,
     PanelInput,
     connection_key,
     keyboard,
@@ -293,6 +294,16 @@ def setup_handlers(
             await message.answer(REVIEW_HELP_TEXT[language])
             return
         await _remember_chat_language(message, database, language)
+        if start_parameter in INPUT_START_ACTIONS:
+            await panel.begin_input(
+                message,
+                message.from_user.id,
+                language,
+                INPUT_START_ACTIONS[start_parameter],
+                state,
+                edit=False,
+            )
+            return
         await send_navigation(message, language, database, force=True)
         text, rows = await panel.home(message, language)
         await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
@@ -717,27 +728,21 @@ def setup_handlers(
             )
             return
 
+        target = await database.get_notification_chat_id()
+        if target is None:
+            await message.answer(
+                choose(
+                    language,
+                    ru="Сначала выберите рабочую группу через её меню.",
+                    en="Select a work group in its menu first.",
+                )
+            )
+            return
         enabled = arg == "on"
-        await database.set_monitoring(message.chat.id, enabled)
-        if enabled:
-            interval = await database.get_poll_interval_minutes()
-            await message.answer(
-                choose(
-                    language,
-                    ru="Уведомления включены для этого чата.\n"
-                    f"Проверка фраз каждые {interval} мин.",
-                    en="Notifications are enabled for this chat.\n"
-                    f"The pool is checked every {interval} minutes.",
-                )
-            )
-        else:
-            await message.answer(
-                choose(
-                    language,
-                    ru="Уведомления выключены для этого чата.",
-                    en="Notifications are disabled for this chat.",
-                )
-            )
+        await database.set_monitoring(target, enabled)
+        await database.set_chat_language(target, language)
+        text, rows = await panel.home(message, language)
+        await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
 
     @dp.message(Command("interval"))
     async def cmd_interval(message: Message, command: CommandObject) -> None:
@@ -786,6 +791,7 @@ def setup_handlers(
             return
 
         await database.set_poll_interval_minutes(minutes)
+        await watcher.reschedule()
         await message.answer(
             choose(
                 language,
@@ -799,8 +805,8 @@ def setup_handlers(
             )
             + choose(
                 language,
-                ru="\n\nПрименится после текущего цикла проверки.",
-                en="\n\nIt will apply after the current check cycle.",
+                ru="\n\nНовый интервал применяется сразу после текущей проверки.",
+                en="\n\nThe new interval applies as soon as the current check finishes.",
             )
         )
 
@@ -808,37 +814,8 @@ def setup_handlers(
     async def cmd_status(message: Message) -> None:
         language = _message_language(message)
         await _remember_chat_language(message, database, language)
-        chat = await database.get_chat_settings(message.chat.id)
-        phrases = await database.list_phrases()
-        interval = await database.get_poll_interval_minutes()
-        monitoring = choose(
-            language,
-            ru="включены" if chat["monitoring_enabled"] else "выключены",
-            en="enabled" if chat["monitoring_enabled"] else "disabled",
-        )
-        threads_account = await threads_auth.status()
-        await message.answer(
-            choose(
-                language,
-                ru=f"<b>Статус</b>\n"
-                f"Фраз для отслеживания: {len(phrases)}\n"
-                f"Уведомления в этом чате: {monitoring}\n"
-                f"Интервал проверки: {interval} мин\n"
-                f"Threads API: "
-                f"{'подключён' if threads_account else 'не подключён'}\n\n",
-                en=f"<b>Status</b>\n"
-                f"Tracked phrases: {len(phrases)}\n"
-                f"Notifications in this chat: {monitoring}\n"
-                f"Check interval: {interval} min\n"
-                f"Threads API: "
-                f"{'connected' if threads_account else 'not connected'}\n\n",
-            )
-            + format_interval_advice(
-                len(phrases),
-                interval,
-                language=language,
-            )
-        )
+        text, rows = await panel.home(message, language)
+        await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
 
     @dp.message(Command("run"))
     async def cmd_run(message: Message) -> None:
@@ -855,13 +832,13 @@ def setup_handlers(
             )
             return
 
-        chat = await database.get_chat_settings(message.chat.id)
-        if not chat["monitoring_enabled"]:
+        target = await database.get_notification_chat_id()
+        if target not in await database.list_notification_chats():
             await message.answer(
                 choose(
                     language,
-                    ru="Уведомления в этом чате выключены. Включите: /monitor on",
-                    en="Notifications are disabled in this chat. Enable: /monitor on",
+                    ru="Уведомления для рабочего чата выключены или группа не выбрана. Откройте /menu.",
+                    en="Work chat notifications are disabled or no group is selected. Open /menu.",
                 )
             )
             return

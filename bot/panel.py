@@ -15,13 +15,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
-    ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
 )
+from aiogram.utils.deep_linking import create_start_link
 
 from bot.access import AccessService
 from bot.access_panel import AccessPanel, setup_access_input
@@ -56,12 +56,21 @@ class PanelInput(StatesGroup):
     destination = State()
 
 
+INPUT_START_ACTIONS = {
+    "input_add": "add",
+    "input_interval": "custom",
+    "input_search": "search",
+}
+
+
 LABELS = {
     "home": ("← В меню", "← Menu"),
+    "refresh": ("↻ Обновить меню", "↻ Refresh menu"),
     "phrases": ("Фразы для отслеживания", "Tracked phrases"),
     "add": ("+ Добавить фразы", "+ Add phrases"),
     "interval": ("Частота проверки", "Check frequency"),
     "custom": ("Указать свой интервал", "Custom interval"),
+    "private_input": ("Ввести в личном чате", "Enter in private chat"),
     "run": ("Проверить сейчас", "Check now"),
     "search": ("Найти публикации", "Find posts"),
     "account": ("Подключение Threads", "Threads connection"),
@@ -90,7 +99,14 @@ def keyboard(owner: int, rows: list[list[tuple[str, str]]]) -> InlineKeyboardMar
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=text, callback_data=f"ui:{owner}:{action}")
+                InlineKeyboardButton(
+                    text=text,
+                    **(
+                        {"url": action}
+                        if action.startswith("https://")
+                        else {"callback_data": f"ui:{owner}:{action}"}
+                    ),
+                )
                 for text, action in row
             ]
             for row in rows
@@ -107,7 +123,7 @@ async def is_admin(message: Message, access: AccessService) -> bool:
 
 
 def navigation_keyboard(
-    language: Language, *, group: bool = False
+    language: Language, *, group: bool = False, placeholder: str | None = None
 ) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -116,6 +132,7 @@ def navigation_keyboard(
                 KeyboardButton(text=label("instructions", language)),
             ]
         ],
+        input_field_placeholder=placeholder,
         is_persistent=True,
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -125,10 +142,14 @@ def navigation_keyboard(
     )
 
 
+def navigation_version(message: Message, language: Language) -> str:
+    return f"{message.bot.id}:1:{language}:{message.chat.type}"
+
+
 async def send_navigation(
     message: Message, language: Language, database: Database, *, force: bool = False
 ) -> None:
-    version = f"{message.bot.id}:1:{language}:{message.chat.type}"
+    version = navigation_version(message, language)
     if not force and (
         await database.get_navigation_keyboard_version(message.chat.id) == version
     ):
@@ -316,6 +337,7 @@ class SettingsPanel:
         ):
             rows.append([(label("access", language), "access")])
         rows.append([(label("instructions", language), "instructions")])
+        rows.append([(label("refresh", language), "home")])
         return text, rows
 
     async def phrases(self, language: Language, page: int = 0, notice: str = ""):
@@ -353,6 +375,79 @@ class SettingsPanel:
         rows.append([(label("home", language), "home")])
         return text, rows
 
+    async def begin_input(
+        self,
+        message: Message,
+        owner: int,
+        language: Language,
+        action: str,
+        state: FSMContext,
+        *,
+        edit: bool = True,
+    ) -> None:
+        back = [[(label("cancel", language), "home")]]
+        if message.chat.type != ChatType.PRIVATE:
+            payload = next(
+                key for key, value in INPUT_START_ACTIONS.items() if value == action
+            )
+            url = await create_start_link(message.bot, payload)
+            text = choose(
+                language,
+                ru="<b>Ввод в личном чате</b>\n\nНажмите кнопку ниже: бот откроет нужный шаг в личном чате. Там можно отправить обычное сообщение. Настройки сохранятся для рабочего чата; результаты разового поиска придут вам лично. Если Telegram покажет «Запустить», нажмите её.",
+                en="<b>Enter in private chat</b>\n\nTap below to open this step in the bot's private chat, then send a normal message there. Settings apply to the work chat; one-time search results are sent privately. If Telegram shows Start, tap it.",
+            )
+            markup = keyboard(owner, [[(label("private_input", language), url)], *back])
+            if edit:
+                await edit_screen(message, text, markup)
+            else:
+                await message.answer(text, reply_markup=markup, parse_mode="HTML")
+            return
+        prompts = {
+            "add": (
+                "Пришлите фразы для отслеживания — каждую с новой строки. Например:\nищу дизайнера\nнужен сайт",
+                "Send phrases to track, one per line. For example:\nlooking for a designer\nneed a website",
+            ),
+            "custom": (
+                f"Пришлите интервал в минутах: от {MIN_POLL_INTERVAL_MINUTES} до {MAX_POLL_INTERVAL_MINUTES}.",
+                f"Send an interval in minutes: {MIN_POLL_INTERVAL_MINUTES}–{MAX_POLL_INTERVAL_MINUTES}.",
+            ),
+            "search": (
+                "Пришлите слово или фразу для разового поиска. В список отслеживания она не попадёт.",
+                "Send a word or phrase for a one-time search. It will not be added to tracked phrases.",
+            ),
+        }
+        placeholders = {
+            "add": ("Фразы — каждая с новой строки", "One phrase per line"),
+            "custom": ("Интервал в минутах, например 5", "Minutes, e.g. 5"),
+            "search": ("Слово или фраза для поиска", "Search word or phrase"),
+        }
+        text = prompts[action][0 if language == "ru" else 1]
+        markup = keyboard(owner, back)
+        if edit:
+            await edit_screen(message, text, markup)
+            panel_message = message
+        else:
+            panel_message = await message.answer(
+                text, reply_markup=markup, parse_mode="HTML"
+            )
+        await message.answer(
+            text,
+            reply_markup=navigation_keyboard(
+                language, placeholder=placeholders[action][0 if language == "ru" else 1]
+            ),
+        )
+        await self.db.set_navigation_keyboard_version(
+            message.chat.id, navigation_version(message, language)
+        )
+        await state.set_state(
+            {
+                "add": PanelInput.phrases,
+                "custom": PanelInput.interval,
+                "search": PanelInput.search,
+            }[action]
+        )
+        await state.update_data(panel_id=panel_message.message_id)
+
     async def interval(self, language: Language, notice: str = ""):
         current = await self.db.get_poll_interval_minutes()
         count = len(await self.db.list_phrases())
@@ -374,7 +469,7 @@ class SettingsPanel:
                 )
                 for value in values
             ]
-            for values in ((15, 30, 60), (120, 240))
+            for values in ((5, 10, 15), (30, 60), (120, 240))
         ]
         rows.extend(
             [
@@ -647,10 +742,11 @@ def setup_panel_handlers(
                 ):
                     return
                 await database.set_poll_interval_minutes(int(value))
+                await watcher.reschedule()
                 notice = choose(
                     language,
-                    ru="Сохранено. Применится после текущего цикла проверки.",
-                    en="Saved. Applies after the current check cycle.",
+                    ru="Сохранено. Следующая проверка будет по новому интервалу.",
+                    en="Saved. The next check uses the new interval.",
                 )
             screen = await panel.interval(language, notice)
         elif action.startswith("notify:"):
@@ -720,42 +816,7 @@ def setup_panel_handlers(
                 await threads_auth.disconnect()
             screen = await panel.account(language)
         elif action in {"add", "custom", "search"}:
-            input_state = {
-                "add": PanelInput.phrases,
-                "custom": PanelInput.interval,
-                "search": PanelInput.search,
-            }[action]
-            prompts = {
-                "add": (
-                    "Пришлите фразы для отслеживания — каждую с новой строки. Например:\nищу дизайнера\nнужен сайт",
-                    "Send phrases to track, one per line. For example:\nlooking for a designer\nneed a website",
-                ),
-                "custom": (
-                    f"Пришлите интервал в минутах: от {MIN_POLL_INTERVAL_MINUTES} до {MAX_POLL_INTERVAL_MINUTES}.",
-                    f"Send an interval in minutes: {MIN_POLL_INTERVAL_MINUTES}–{MAX_POLL_INTERVAL_MINUTES}.",
-                ),
-                "search": (
-                    "Пришлите слово или фразу для разового поиска. В список отслеживания она не попадёт.",
-                    "Send a word or phrase for a one-time search. It will not be added to tracked phrases.",
-                ),
-            }
-            prompt_text = prompts[action][0 if language == "ru" else 1]
-            await show(
-                message, owner, (prompt_text, [[(label("cancel", language), "home")]])
-            )
-            # ForceReply lets the bot receive replies in groups with privacy mode enabled.
-            prompt = await message.answer(
-                f'<a href="tg://user?id={owner}">{escape(callback.from_user.first_name)}</a>, '
-                + prompt_text,
-                reply_markup=navigation_keyboard(language)
-                if message.chat.type == ChatType.PRIVATE
-                else ForceReply(selective=True),
-                parse_mode="HTML",
-            )
-            await state.set_state(input_state)
-            await state.update_data(
-                panel_id=message.message_id, prompt_id=prompt.message_id
-            )
+            await panel.begin_input(message, owner, language, action, state)
             return
         elif action in {"recent", "top"}:
             query = (
@@ -887,12 +948,13 @@ def setup_panel_handlers(
                 )
                 return
             await database.set_poll_interval_minutes(int(raw))
+            await watcher.reschedule()
             screen = await panel.interval(
                 language,
                 choose(
                     language,
-                    ru="Сохранено. Применится после текущего цикла проверки.",
-                    en="Saved. Applies after the current check cycle.",
+                    ru="Сохранено. Следующая проверка будет по новому интервалу.",
+                    en="Saved. The next check uses the new interval.",
                 ),
             )
         elif current == PanelInput.phrases.state:

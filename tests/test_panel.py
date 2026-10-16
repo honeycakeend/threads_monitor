@@ -4,8 +4,15 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.methods import EditMessageText, GetChat, GetChatMember, SendMessage
-from aiogram.types import Chat, ChatMemberMember, Message, ReplyKeyboardMarkup, Update
+from aiogram.methods import EditMessageText, GetChat, GetChatMember, GetMe, SendMessage
+from aiogram.types import (
+    Chat,
+    ChatMemberMember,
+    Message,
+    ReplyKeyboardMarkup,
+    Update,
+    User,
+)
 from test_commands import MockTelegramSession, make_update
 
 from bot.config import settings
@@ -25,6 +32,13 @@ class PanelSession(MockTelegramSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.requests.append(method)
+        if isinstance(method, GetMe):
+            return User(
+                id=bot.id,
+                is_bot=True,
+                first_name="Bot",
+                username="alsmm_threads_monitor_bot",
+            )
         if isinstance(method, GetChatMember):
             if not self.send_allowed:
                 from aiogram.exceptions import TelegramForbiddenError
@@ -218,12 +232,15 @@ async def test_add_flow_edits_panel_and_does_not_enable_notifications(app):
 
 
 @pytest.mark.asyncio
-async def test_shared_chat_input_requires_reply_and_does_not_capture_conversation(app):
+async def test_shared_chat_input_redirects_and_does_not_capture_conversation(app):
     await app.click("add", group=True)
-    prompt_id = app.session.next_id
+    assert "Ввод в личном чате" in app.last.text
+    assert any(button.url and "start=input_add" in button.url for button in app.buttons)
     await app.text("обычный разговор", group=True)
+    await app.text("designer", group=True)
     assert await app.db.list_phrases() == []
-    await app.text("designer", group=True, reply_to=prompt_id)
+    await app.text("/start input_add")
+    await app.text("designer")
     assert (await app.db.list_phrases())[0]["phrase"] == "designer"
 
 
@@ -619,14 +636,24 @@ async def test_navigation_hint_not_repeated_by_buttons_or_entry_points(app, grou
 
 
 @pytest.mark.asyncio
-async def test_group_input_remains_reply_scoped_without_repeat_hint(app):
+async def test_group_custom_interval_opens_private_step_and_accepts_plain_number(app):
     await app.text("/menu", group=True)
-    await app.click("add", group=True)
-    prompt_id = app.session.next_id
     app.session.requests.clear()
-    await app.text("designer", group=True, reply_to=prompt_id)
-    assert isinstance(app.last, EditMessageText)
-    assert not any(isinstance(request, SendMessage) for request in app.session.requests)
+    await app.click("custom", group=True)
+    assert not any(isinstance(r, SendMessage) for r in app.session.requests)
+    assert any(b.url and "start=input_interval" in b.url for b in app.buttons)
+    await app.text("5", group=True)
+    assert await app.db.get_poll_interval_minutes() != 5
+    await app.text("/start input_interval")
+    assert (
+        app.last.reply_markup.input_field_placeholder
+        == "Интервал в минутах, например 5"
+    )
+    await app.text("5")
+    assert await app.db.get_poll_interval_minutes() == 5
+    app.watcher.reschedule.assert_awaited_once()
+    await app.text("/menu", group=True)
+    assert "каждые 5 мин" in app.last.text
 
 
 @pytest.mark.asyncio
@@ -651,3 +678,59 @@ async def test_failed_keyboard_installation_is_retried(app, monkeypatch):
     monkeypatch.setattr(app.session, "make_request", original)
     await app.text("/menu")
     assert await app.db.get_navigation_keyboard_version(7)
+
+
+@pytest.mark.asyncio
+async def test_five_minutes_is_a_direct_group_button_and_wakes_scheduler(app):
+    await app.click("interval", group=True)
+    assert any(
+        b.text == "5 мин" and b.callback_data.endswith(":every:5") for b in app.buttons
+    )
+    await app.click("every:5", group=True)
+    assert await app.db.get_poll_interval_minutes() == 5
+    assert any(b.text == "✓ 5 мин" for b in app.buttons)
+    app.watcher.reschedule.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_private_search_link_opens_search_step_without_group_input(app):
+    await app.click("search", group=True)
+    assert any(b.url and "start=input_search" in b.url for b in app.buttons)
+    await app.text("/start input_search")
+    await app.text("Threads API")
+    assert "Какие публикации" in app.last.text
+    await app.click("recent", message_id=app.last.message_id)
+    app.search.search_by_keyword.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_input_links_reject_unauthorized_and_reviewer_users(app):
+    for user in [9001, 9002]:
+        app.review.is_active = AsyncMock(return_value=user == 9002)
+        await app.text("/start input_interval", user=user)
+        await app.text("5", user=user)
+    assert await app.db.get_poll_interval_minutes() != 5
+
+
+@pytest.mark.asyncio
+async def test_status_and_monitor_use_work_group_from_private_chat(app):
+    await app.db.add_phrases(["designer"])
+    await app.db.set_monitoring(7, True)
+    await app.db.set_monitoring(-100, False)
+    await app.text("/status")
+    assert "Уведомления: приостановлены" in app.last.text
+    assert "Получатель: Команда" in app.last.text
+    await app.text("/monitor on")
+    assert (await app.db.get_chat_settings(-100))["monitoring_enabled"]
+    await app.text("/status", group=True)
+    assert "Уведомления: включены" in app.last.text
+    await app.text("/monitor off")
+    assert not (await app.db.get_chat_settings(-100))["monitoring_enabled"]
+    assert (await app.db.get_chat_settings(7))["monitoring_enabled"]
+
+
+@pytest.mark.asyncio
+async def test_interval_command_wakes_scheduler(app):
+    await app.text("/interval 5")
+    assert await app.db.get_poll_interval_minutes() == 5
+    app.watcher.reschedule.assert_awaited_once()

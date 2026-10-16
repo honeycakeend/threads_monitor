@@ -11,6 +11,7 @@ INSTRUCTIONS: dict[Language, str] = {
 <b>Для начала</b>
 Нажмите «Меню» внизу чата → подключите Threads → добавьте фразы → включите уведомления.
 Подключить аккаунт может администратор в личном чате с ботом.
+Для ввода фраз или своего интервала в группе нажмите «Ввести в личном чате». Готовые интервалы выбираются сразу кнопками.
 
 <b>Кнопки в меню</b>
 • <b>Фразы для отслеживания</b> — добавить или удалить слова и фразы, которые нужно искать. Например: «ищу дизайнера» найдёт и «ищу хороших дизайнеров». Формы русских слов учитываются; все слова должны быть в самом посте.
@@ -32,7 +33,7 @@ INSTRUCTIONS: dict[Language, str] = {
 <b>Доступ — для владельца</b>
 «Меню» → «Пользователи и доступ» → «Добавить пользователя» → числовой Telegram ID → права → «Сохранить права». «Настройки + Threads» разрешает менять аккаунт. Отзыв доступа — в карточке пользователя. Изменения действуют сразу.
 
-Вернуться к настройкам: кнопка «Меню». Эта инструкция: кнопка «Инструкция». Если нижние кнопки скрыты, раскройте клавиатуру значком рядом с полем ввода. Первый запуск: /start; также доступны /menu и /instructions.""",
+Меню и инструкция — на кнопках внизу. Если они скрыты, отправьте /start.""",
     "en": """<b>How to use the bot</b>
 
 The bot finds your phrases in the text of Threads posts, excluding replies, and sends new matches to your work chat.
@@ -40,6 +41,7 @@ The bot finds your phrases in the text of Threads posts, excluding replies, and 
 <b>Getting started</b>
 Tap Menu below → connect Threads → add phrases → enable notifications.
 An administrator connects the account in a private chat with the bot.
+For typed input from a group, tap Enter in private chat. Preset intervals apply directly.
 
 <b>Menu buttons</b>
 • <b>Tracked phrases</b> — add or remove words and phrases to search for. All query words must be in the post itself; extra words are allowed. Russian word forms are matched automatically.
@@ -61,7 +63,7 @@ Phrases and check frequency are shared by the team. The first check remembers ex
 <b>Access — owner only</b>
 Menu → Users and access → Add user → numeric Telegram ID → role → Save access. Settings + Threads also permits account changes. Revoke access from the user's card. Changes take effect immediately.
 
-Settings: the Menu button. This guide: the Instructions button. If the bottom buttons are hidden, expand the keyboard using the icon next to the input field. First start: /start; /menu and /instructions are also available.""",
+Use the Menu and Instructions buttons below. Send /start to reinstall hidden buttons.""",
 }
 
 
@@ -130,7 +132,7 @@ HELP_TEXT: dict[Language, str] = {
 /remove &lt;phrase&gt; — remove a phrase by text
 
 <b>Monitoring</b>
-/monitor on — enable notifications in this chat
+/monitor on — enable work chat notifications
 /monitor off — disable notifications
 /interval — show the interval and estimated usage
 /interval 30 — set the interval in minutes
