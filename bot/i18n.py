@@ -3,6 +3,48 @@ from typing import Literal
 Language = Literal["ru", "en"]
 
 
+INSTRUCTIONS: dict[Language, str] = {
+    "ru": """<b>Как пользоваться ботом</b>
+
+Бот ищет публикации в Threads по вашим фразам и присылает новые совпадения в рабочий чат.
+
+<b>Для начала</b>
+Откройте /menu → подключите Threads → добавьте фразы → включите уведомления.
+Подключить аккаунт может администратор в личном чате с ботом.
+
+<b>Кнопки в меню</b>
+• <b>Фразы для отслеживания</b> — добавить или удалить слова и фразы, которые нужно искать. Например: «ищу дизайнера».
+• <b>Частота проверки</b> — выбрать, как часто искать новые публикации.
+• <b>Включить / Приостановить уведомления</b> — управлять отправкой в указанный рабочий чат.
+• <b>Проверить сейчас</b> — запустить проверку всех сохранённых фраз.
+• <b>Найти публикации</b> — разовый поиск последних или популярных постов. Фраза не сохраняется.
+• <b>Подключение Threads</b> — подключить аккаунт, проверить его состояние или отключить его. Доступно администратору.
+
+Список фраз и частота проверки общие для команды. При первой проверке бот запоминает существующие посты; уведомления приходят только о новых.
+
+Вернуться к настройкам: /menu. Эта инструкция: /instructions или сообщение «Инструкция».""",
+    "en": """<b>How to use the bot</b>
+
+The bot searches Threads for your phrases and sends new matches to your work chat.
+
+<b>Getting started</b>
+Open /menu → connect Threads → add phrases → enable notifications.
+An administrator connects the account in a private chat with the bot.
+
+<b>Menu buttons</b>
+• <b>Tracked phrases</b> — add or remove words and phrases to search for. For example: “looking for a designer”.
+• <b>Check frequency</b> — choose how often to look for new posts.
+• <b>Enable / Pause notifications</b> — control delivery to the displayed work chat.
+• <b>Check now</b> — check all saved phrases immediately.
+• <b>Find posts</b> — search recent or popular posts once, without saving the phrase.
+• <b>Threads connection</b> — connect an account, check its status or disconnect it. Available to administrators.
+
+Phrases and check frequency are shared by the team. The first check remembers existing posts; notifications are sent only for newer matches.
+
+Settings: /menu. These instructions: /instructions or send “Instructions”.""",
+}
+
+
 def language_from_code(language_code: str | None) -> Language:
     if not language_code:
         return "en"
@@ -18,10 +60,13 @@ HELP_TEXT: dict[Language, str] = {
     "ru": """
 <b>Threads Monitor Bot</b>
 
-<b>Пул фраз</b> (общая база для всех пользователей бота)
-/add &lt;фраза&gt; — добавить фразу в пул
+/menu — настройки с кнопками
+/instructions — короткая инструкция
+
+<b>Фразы для отслеживания</b> (общая база для всех пользователей бота)
+/add &lt;фраза&gt; — добавить фразу в список
 /add фраза1 | фраза2 — несколько фраз сразу
-/pool — посмотреть весь пул
+/pool — посмотреть весь список
 /list — то же, что /pool
 /remove &lt;id&gt; — удалить фразу по номеру
 /remove &lt;текст фразы&gt; — удалить по тексту
@@ -31,7 +76,7 @@ HELP_TEXT: dict[Language, str] = {
 /monitor off — выключить уведомления
 /interval — текущий интервал и расход лимита
 /interval 30 — интервал проверки в минутах
-/run — проверить пул прямо сейчас
+/run — проверить фразы прямо сейчас
 /status — статус
 
 <b>Разовый поиск</b>
@@ -53,7 +98,10 @@ HELP_TEXT: dict[Language, str] = {
     "en": """
 <b>Threads Monitor Bot</b>
 
-<b>Phrase pool</b> (shared by the bot workspace)
+/menu — settings with buttons
+/instructions — short usage guide
+
+<b>Tracked phrases</b> (shared by the bot workspace)
 /add &lt;phrase&gt; — add a phrase to the pool
 /add phrase one | phrase two — add several phrases
 /pool — show the complete pool
@@ -120,22 +168,26 @@ notification chat, interval, or production Threads connection.
 
 BOT_COMMANDS: dict[Language, tuple[tuple[str, str], ...]] = {
     "ru": (
-        ("start", "Запустить бота и показать справку"),
+        ("start", "Запустить бота и открыть меню"),
+        ("menu", "Настройки бота"),
+        ("instructions", "Инструкция — как пользоваться ботом"),
         ("help", "Показать все команды"),
         ("search", "Разовый поиск в Threads"),
-        ("add", "Добавить фразу в общий пул"),
-        ("pool", "Показать пул фраз"),
-        ("remove", "Удалить фразу из пула"),
+        ("add", "Добавить фразу для отслеживания"),
+        ("pool", "Показать список фраз"),
+        ("remove", "Удалить фразу из списка"),
         ("monitor", "Включить или выключить уведомления"),
         ("interval", "Показать или изменить интервал"),
-        ("run", "Проверить пул сейчас"),
+        ("run", "Проверить фразы сейчас"),
         ("status", "Показать статус бота"),
         ("connect_threads", "Подключить Threads через OAuth"),
         ("threads_status", "Показать статус Threads"),
         ("disconnect_threads", "Отключить Threads и удалить токен"),
     ),
     "en": (
-        ("start", "Start the bot and show help"),
+        ("start", "Start the bot and open the menu"),
+        ("menu", "Bot settings"),
+        ("instructions", "Instructions — how to use the bot"),
         ("help", "Show all commands"),
         ("search", "Run a one-time Threads search"),
         ("add", "Add a phrase to the shared pool"),

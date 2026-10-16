@@ -11,8 +11,10 @@ from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BotCommand,
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -30,6 +32,7 @@ from bot.i18n import (
     language_from_code,
 )
 from bot.oauth_server import create_oauth_app
+from bot.panel import PanelInput, connection_key, keyboard, setup_panel_handlers
 from bot.reviewer_access import REVIEW_START_PREFIX, ReviewerAccessService
 from bot.search_service import SearchService, format_search_result
 from bot.storage import (
@@ -57,6 +60,9 @@ REVIEWER_COMMANDS = frozenset(
     {
         "start",
         "help",
+        "instructions",
+        "menu",
+        "cancel",
         "connect_threads",
         "threads_status",
         "search",
@@ -91,6 +97,10 @@ class AccessMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
+        if isinstance(event, Message) and event.text and event.text.startswith("/"):
+            state = data.get("state")
+            if state is not None:
+                await state.clear()
         allowed_users = set(settings.allowed_user_ids) | set(
             settings.threads_oauth_admin_user_ids
         )
@@ -104,9 +114,22 @@ class AccessMiddleware(BaseMiddleware):
             await self._remember_language(event)
             return await handler(event, data)
 
+        if isinstance(event, CallbackQuery):
+            await event.answer(
+                choose(
+                    language_from_code(user.language_code if user else None),
+                    ru="Настройки недоступны. Откройте /help в личном чате с ботом.",
+                    en="Settings unavailable. Open /help in a private chat with the bot.",
+                ),
+                show_alert=True,
+            )
+            return None
+
         if isinstance(event, Message) and user is not None:
             language = language_from_code(user.language_code)
             command, argument = _command_and_argument(event)
+            if (event.text or "").strip().casefold() in {"инструкция", "instructions"}:
+                command = "instructions"
             if command == "start" and argument.startswith(REVIEW_START_PREFIX):
                 data["reviewer_mode"] = False
                 return await handler(event, data)
@@ -161,8 +184,8 @@ def _format_pool(phrases: list[dict], language: Language) -> str:
     lines = [
         choose(
             language,
-            ru=f"<b>Пул фраз</b> ({len(phrases)}):",
-            en=f"<b>Phrase pool</b> ({len(phrases)}):",
+            ru=f"<b>Фразы для отслеживания</b> ({len(phrases)}):",
+            en=f"<b>Tracked phrases</b> ({len(phrases)}):",
         )
     ]
     for item in phrases:
@@ -229,9 +252,11 @@ def setup_handlers(
     async def cmd_start(
         message: Message,
         command: CommandObject,
+        state: FSMContext,
         reviewer_mode: bool = False,
     ) -> None:
         language = _message_language(message)
+        await state.clear()
         start_parameter = (command.args or "").strip()
         if start_parameter.startswith(REVIEW_START_PREFIX):
             if message.chat.type != ChatType.PRIVATE or message.from_user is None:
@@ -263,18 +288,8 @@ def setup_handlers(
             await message.answer(REVIEW_HELP_TEXT[language])
             return
         await _remember_chat_language(message, database, language)
-        await database.set_monitoring(message.chat.id, True)
-        await message.answer(
-            choose(
-                language,
-                ru="Привет! Я мониторю Threads по фразам из общего пула и "
-                "присылаю ссылки на новые посты.\n\n",
-                en="Hi! I monitor Threads using the shared phrase pool and send "
-                "links to new matching posts.\n\n",
-            )
-            + HELP_TEXT[language],
-            disable_web_page_preview=True,
-        )
+        text, rows = await panel.home(message, language)
+        await message.answer(text, reply_markup=keyboard(message.from_user.id, rows))
 
     @dp.message(Command("help"))
     async def cmd_help(message: Message, reviewer_mode: bool = False) -> None:
@@ -288,7 +303,7 @@ def setup_handlers(
     async def cmd_connect_threads(
         message: Message,
         reviewer_mode: bool = False,
-    ) -> None:
+    ) -> bool:
         language = _message_language(message)
         if reviewer_mode:
             if message.chat.type != ChatType.PRIVATE or message.from_user is None:
@@ -299,27 +314,27 @@ def setup_handlers(
                         en="This command is only available in a private chat.",
                     )
                 )
-                return
+                return False
         elif not await _require_oauth_admin(message):
-            return
+            return False
         if not settings.threads_oauth_configured:
             await message.answer(
                 choose(
                     language,
-                    ru="OAuth Threads настроен не полностью. Проверьте переменные окружения.",
-                    en="Threads OAuth is not fully configured. Check the server environment.",
+                    ru="Подключение Threads ещё не настроено. Обратитесь к администратору сервиса.",
+                    en="Threads connection has not been set up yet. Contact the service administrator.",
                 )
             )
-            return
+            return False
         if not reviewer_mode and settings.threads_primary_chat_id is None:
             await message.answer(
                 choose(
                     language,
-                    ru="THREADS_PRIMARY_CHAT_ID не настроен на сервере.",
-                    en="THREADS_PRIMARY_CHAT_ID is not configured on the server.",
+                    ru="Рабочий чат для уведомлений ещё не настроен. Обратитесь к администратору сервиса.",
+                    en="The notification chat has not been set up yet. Contact the service administrator.",
                 )
             )
-            return
+            return False
         assert message.from_user is not None
         try:
             if reviewer_mode:
@@ -344,7 +359,7 @@ def setup_handlers(
                     en=f"Could not start authorization: {escape(str(exc))}",
                 )
             )
-            return
+            return False
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -362,15 +377,16 @@ def setup_handlers(
         await message.answer(
             choose(
                 language,
-                ru="Нажмите кнопку и предоставьте threads_basic и "
-                "threads_keyword_search. Одноразовая ссылка действует "
+                ru="Нажмите кнопку и подтвердите доступ к аккаунту и поиску публикаций "
+                "на странице Threads. Одноразовая ссылка действует "
                 f"{settings.threads_oauth_state_ttl_minutes} мин.",
-                en="Open the button and grant threads_basic and "
-                "threads_keyword_search. This one-time link is valid for "
+                en="Open the button and allow access to your account and post search "
+                "on the Threads page. This one-time link is valid for "
                 f"{settings.threads_oauth_state_ttl_minutes} minutes.",
             ),
             reply_markup=keyboard,
         )
+        return True
 
     @dp.message(Command("threads_status"))
     async def cmd_threads_status(
@@ -431,6 +447,7 @@ def setup_handlers(
     @dp.message(Command("disconnect_threads"))
     async def cmd_disconnect_threads(
         message: Message,
+        state: FSMContext,
         reviewer_mode: bool = False,
     ) -> None:
         language = _message_language(message)
@@ -456,16 +473,8 @@ def setup_handlers(
             return
         if not await _require_oauth_admin(message):
             return
-        disconnected = await threads_auth.disconnect()
-        if disconnected:
-            await message.answer(
-                choose(
-                    language,
-                    ru="Threads отключён. Зашифрованный токен удалён из активной записи.",
-                    en="Threads is disconnected. The encrypted token has been deleted.",
-                )
-            )
-        else:
+        account = await threads_auth.status()
+        if not account:
             await message.answer(
                 choose(
                     language,
@@ -473,6 +482,30 @@ def setup_handlers(
                     en="Threads is already disconnected.",
                 )
             )
+            return
+        confirmation = await message.answer(
+            choose(
+                language,
+                ru="Отключить Threads? Поиск и уведомления остановятся. Список фраз сохранится.",
+                en="Disconnect Threads? Search and notifications will stop. Your phrases will be kept.",
+            ),
+            reply_markup=keyboard(
+                message.from_user.id,
+                [
+                    [
+                        (
+                            choose(language, ru="Да, отключить", en="Yes, disconnect"),
+                            "confirm_disconnect",
+                        )
+                    ],
+                    [(choose(language, ru="Отмена", en="Cancel"), "account")],
+                ],
+            ),
+        )
+        await state.set_state(PanelInput.disconnect)
+        await state.update_data(
+            disconnect_key=connection_key(account), panel_id=confirmation.message_id
+        )
 
     @dp.message(Command("search"))
     async def cmd_search(
@@ -562,11 +595,10 @@ def setup_handlers(
             return
 
         added = await database.add_phrases(phrases)
-        await database.set_monitoring(message.chat.id, True)
         lines = [
             choose(
                 language,
-                ru="<b>Обновлён пул фраз:</b>",
+                ru="<b>Обновлён список фраз:</b>",
                 en="<b>Updated phrase pool:</b>",
             )
         ]
@@ -594,7 +626,7 @@ def setup_handlers(
             await message.answer(
                 choose(
                     language,
-                    ru="Пул пуст. Добавьте фразы: /add python asyncio",
+                    ru="Нет фраз для отслеживания. Добавьте фразы: /add python asyncio",
                     en="The pool is empty. Add phrases: /add python asyncio",
                 )
             )
@@ -609,12 +641,8 @@ def setup_handlers(
             await message.answer(
                 choose(
                     language,
-                    ru="Укажите id или текст фразы:\n"
-                    "/remove 2\n"
-                    "/remove startup idea",
-                    en="Enter a phrase ID or text:\n"
-                    "/remove 2\n"
-                    "/remove startup idea",
+                    ru="Укажите id или текст фразы:\n/remove 2\n/remove startup idea",
+                    en="Enter a phrase ID or text:\n/remove 2\n/remove startup idea",
                 )
             )
             return
@@ -640,16 +668,16 @@ def setup_handlers(
             await message.answer(
                 choose(
                     language,
-                    ru=f'Фраза «{escape(deleted_text)}» удалена из пула.',
-                    en=f'Phrase “{escape(deleted_text)}” was removed from the pool.',
+                    ru=f"Фраза «{escape(deleted_text)}» удалена из списка.",
+                    en=f"Phrase “{escape(deleted_text)}” was removed from the pool.",
                 )
             )
         else:
             await message.answer(
                 choose(
                     language,
-                    ru=f'Фраза «{escape(target)}» не найдена в пуле.',
-                    en=f'Phrase “{escape(target)}” was not found in the pool.',
+                    ru=f"Фраза «{escape(target)}» не найдена в списке.",
+                    en=f"Phrase “{escape(target)}” was not found in the pool.",
                 )
             )
 
@@ -676,7 +704,7 @@ def setup_handlers(
                 choose(
                     language,
                     ru="Уведомления включены для этого чата.\n"
-                    f"Проверка пула каждые {interval} мин.",
+                    f"Проверка фраз каждые {interval} мин.",
                     en="Notifications are enabled for this chat.\n"
                     f"The pool is checked every {interval} minutes.",
                 )
@@ -772,13 +800,13 @@ def setup_handlers(
             choose(
                 language,
                 ru=f"<b>Статус</b>\n"
-                f"Фраз в пуле: {len(phrases)}\n"
+                f"Фраз для отслеживания: {len(phrases)}\n"
                 f"Уведомления в этом чате: {monitoring}\n"
                 f"Интервал проверки: {interval} мин\n"
                 f"Threads API: "
                 f"{'подключён' if threads_account else 'не подключён'}\n\n",
                 en=f"<b>Status</b>\n"
-                f"Phrases in pool: {len(phrases)}\n"
+                f"Tracked phrases: {len(phrases)}\n"
                 f"Notifications in this chat: {monitoring}\n"
                 f"Check interval: {interval} min\n"
                 f"Threads API: "
@@ -800,7 +828,7 @@ def setup_handlers(
             await message.answer(
                 choose(
                     language,
-                    ru="Пул пуст. Добавьте фразы: /add python",
+                    ru="Нет фраз для отслеживания. Добавьте фразы: /add python",
                     en="The pool is empty. Add phrases: /add python",
                 )
             )
@@ -820,7 +848,7 @@ def setup_handlers(
         await message.answer(
             choose(
                 language,
-                ru="Запускаю проверку пула...",
+                ru="Запускаю проверку фраз...",
                 en="Checking the phrase pool...",
             )
         )
@@ -850,6 +878,15 @@ def setup_handlers(
             )
         )
 
+    panel = setup_panel_handlers(
+        dp,
+        database=database,
+        threads_auth=threads_auth,
+        search_service=search_service,
+        watcher=watcher,
+        connect=cmd_connect_threads,
+    )
+
 
 async def _run_search(
     message: Message,
@@ -863,8 +900,8 @@ async def _run_search(
     await message.answer(
         choose(
             language,
-            ru=f'Ищу «{escape(query)}» ({search_type.value})...',
-            en=f'Searching for “{escape(query)}” ({search_type.value})...',
+            ru=f"Ищу «{escape(query)}» ({search_type.value})...",
+            en=f"Searching for “{escape(query)}” ({search_type.value})...",
         )
     )
     try:
@@ -939,6 +976,7 @@ def create_dispatcher(
 
     dp = Dispatcher()
     dp.message.middleware(AccessMiddleware(reviewer_access, database))
+    dp.callback_query.middleware(AccessMiddleware(reviewer_access, database))
     setup_handlers(
         dp,
         search_service=search,
@@ -1008,9 +1046,7 @@ async def run_bot() -> None:
         )
         refresh_worker = TokenRefreshWorker(
             token_manager,
-            check_interval=timedelta(
-                hours=settings.threads_token_refresh_check_hours
-            ),
+            check_interval=timedelta(hours=settings.threads_token_refresh_check_hours),
         )
         dp = create_dispatcher(
             search_service=search_service,

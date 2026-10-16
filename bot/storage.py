@@ -174,7 +174,7 @@ def format_interval_advice(
     lines = (
         [
             f"Интервал: <b>{interval_minutes} мин</b>",
-            f"Фраз в пуле: <b>{phrase_count}</b>",
+            f"Фраз для отслеживания: <b>{phrase_count}</b>",
             (
                 f"≈ <b>{daily}</b> запросов/сутки "
                 f"(лимит Meta: {THREADS_KEYWORD_SEARCH_DAILY_LIMIT})"
@@ -183,7 +183,7 @@ def format_interval_advice(
         if language == "ru"
         else [
             f"Interval: <b>{interval_minutes} min</b>",
-            f"Phrases in pool: <b>{phrase_count}</b>",
+            f"Tracked phrases: <b>{phrase_count}</b>",
             (
                 f"≈ <b>{daily}</b> requests/day "
                 f"(Meta limit: {THREADS_KEYWORD_SEARCH_DAILY_LIMIT})"

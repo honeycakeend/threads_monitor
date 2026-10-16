@@ -107,6 +107,33 @@ python scripts/search_cli.py "keyword" --limit 3
 
 ## Bot commands
 
+### Settings panel
+
+`/start` and `/menu` open a compact Telegram panel with the connected account,
+recipient chat, tracked phrase count, check frequency, and notification state.
+The panel suggests the next setup step until the bot is ready. Opening it and
+adding phrases preserve the current notification state.
+
+The panel provides phrase management (including multiple phrases, one per line,
+and paginated removal), check frequency presets/custom input, primary-chat
+notification controls, an immediate check, and recent/popular one-time search.
+Settings screens update in place; input prompts support replies in groups.
+Use `/cancel` or the Cancel button to stop input. Input in progress is temporary
+and is cancelled when the bot restarts; saved settings remain in SQLite.
+
+Account controls appear only for OAuth administrators in private chats.
+Disconnecting the production account requires confirmation, including when
+using `/disconnect_threads`. A cancelled or outdated confirmation cannot
+disconnect a newly connected account. Meta reviewer access remains isolated
+and cannot operate the production settings panel.
+
+### Simple instructions
+
+Use the **Инструкция / Instructions** button, `/instructions`, or send
+**Инструкция** / **Instructions** as a message. The short guide explains each
+button, how to start, the shared team settings, and why the first monitoring
+check does not send existing posts. `/help` retains the detailed command list.
+
 The bot reads Telegram's `language_code` on every incoming command. Codes `ru`
 and `ru-*` receive Russian text; every other code, including a missing value,
 receives English. This applies to help, validation/errors, status, search
@@ -116,8 +143,10 @@ chat when an administrator connects Threads or uses a monitoring command there.
 
 - `/connect_threads` — create an OAuth button; OAuth administrator, private chat only
 - `/threads_status` — show connected account, bound chat, and token expiry; OAuth administrator, private chat only
-- `/disconnect_threads` — disable the account and erase its stored ciphertext; OAuth administrator, private chat only
-- `/start` — start the bot and enable monitoring for the current chat
+- `/disconnect_threads` — confirm disconnecting the account and erase its stored ciphertext; OAuth administrator, private chat only
+- `/start`, `/menu` — open the settings panel without changing notification settings
+- `/instructions` — show the short usage guide (also available as “Инструкция” / “Instructions”)
+- `/cancel` — cancel input and return to the settings panel
 - `/help` — show command help
 - `/search <phrase>` — one-time recent-post search
 - `/search top <phrase>` — top-post search

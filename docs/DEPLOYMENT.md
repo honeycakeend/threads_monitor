@@ -163,7 +163,7 @@ Business Verification is not always required to click Publish, but Advanced Acce
 ## 7. Manual end-to-end verification
 
 1. Set Telegram to Russian, send `/help`, and verify Russian help and command-menu descriptions. Switch Telegram to any non-Russian language, send `/help` again, and verify English. A missing language code also falls back to English.
-2. In the primary internal Telegram chat, send `/start` or `/monitor on` and verify the bot can post there in the language last stored for that chat.
+2. Send `/start` or `/menu` in a private chat. Verify the settings panel shows the account, recipient, phrase count, interval, and notification state. Opening the panel must preserve the current notification state. Enable notifications explicitly using the panel when ready.
 3. In a private chat, have an ID listed in `THREADS_OAUTH_ADMIN_USER_IDS` send `/connect_threads`.
 4. Verify the bot returns an HTTPS button and no token/code is visible in Telegram.
 5. Open the button while signed into the designated Threads test account. Confirm the consent screen requests only `threads_basic` and `threads_keyword_search`.
@@ -176,6 +176,15 @@ Business Verification is not always required to click Publish, but Advanced Acce
 12. Use Meta's dashboard/test facility to send a deauthorize callback. Verify `/threads_status` becomes disconnected and search no longer runs.
 13. Reconnect, then use Meta's data-deletion callback test. Verify the JSON response contains `url` and `confirmation_code`, the returned status URL displays completion, and the account credential/binding is removed.
 14. Reconnect again if the service must remain operational after destructive callback testing.
+
+### Settings panel and instructions smoke check
+
+1. In a private chat with the bot, send `/menu`. Check the next-step hint and the recipient chat name.
+2. Press **Инструкция / Instructions**, return with **В меню / Menu**, then try `/instructions` and the plain message **Инструкция** / **Instructions**. All three entry points must show the short usage guide in the user's language.
+3. Open **Фразы для отслеживания / Tracked phrases** and **Частота проверки / Check frequency**. Use Back without changing values; existing phrases and interval must remain unchanged.
+4. Start adding phrases, then cancel without sending text. This must not add a phrase or enable notifications.
+5. As an OAuth administrator, open **Подключение Threads / Threads connection**. If the account is connected, open the disconnect confirmation and choose Cancel. The account must remain connected.
+6. These checks do not require running a search, changing the phrase list, pausing notifications, or disconnecting the account.
 
 ## 8. App Review evidence
 

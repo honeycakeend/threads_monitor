@@ -64,7 +64,10 @@ def make_update(
             "message": {
                 "message_id": 1,
                 "date": 1_700_000_000,
-                "chat": {"id": user_id if chat_type == "private" else -100, "type": chat_type},
+                "chat": {
+                    "id": user_id if chat_type == "private" else -100,
+                    "type": chat_type,
+                },
                 "from": {
                     "id": user_id,
                     "is_bot": False,
@@ -145,8 +148,8 @@ async def test_status_and_disconnect_commands(monkeypatch):
         await dp.feed_update(bot, make_update("/threads_status"))
         assert "/connect_threads" in session.requests[-1].text
         await dp.feed_update(bot, make_update("/disconnect_threads"))
-        assert auth.disconnected is True
-        assert "отключён" in session.requests[-1].text
+        assert auth.disconnected is False
+        assert "уже отключён" in session.requests[-1].text
     finally:
         await bot.session.close()
 
@@ -166,13 +169,13 @@ async def test_help_uses_telegram_user_language(monkeypatch):
     bot = Bot("123456:TEST_TOKEN", session=session)
     try:
         await dp.feed_update(bot, make_update("/help", language_code="ru-RU"))
-        assert "Пул фраз" in session.requests[-1].text
+        assert "Фразы для отслеживания" in session.requests[-1].text
 
         await dp.feed_update(bot, make_update("/help", language_code="fr"))
-        assert "Phrase pool" in session.requests[-1].text
+        assert "Tracked phrases" in session.requests[-1].text
 
         await dp.feed_update(bot, make_update("/help", language_code=None))
-        assert "Phrase pool" in session.requests[-1].text
+        assert "Tracked phrases" in session.requests[-1].text
     finally:
         await bot.session.close()
 
