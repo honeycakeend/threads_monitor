@@ -113,6 +113,20 @@ python scripts/search_cli.py "keyword" --limit 3
 
 ## Bot commands
 
+### Post text matching
+
+Keyword searches and monitoring only keep top-level posts (`is_reply = false`)
+whose own `text` contains the literal query phrase. Matching ignores case,
+repeated whitespace and line breaks, and normalizes Unicode to NFC. Replies are
+excluded even when they contain the phrase. A post having replies is still
+eligible if its own text matches. Quoted content, usernames, link previews and
+comment text are not used for matching; a quote post qualifies only if its own
+text matches. The returned count reflects the filtered posts.
+
+This filters the page returned by Threads without extra API requests. It can
+return fewer posts than the requested limit, and does not scan further pages
+to replace rejected results. Topic-tag search retains its existing semantics.
+
 ### Settings panel
 
 `/start` and `/menu` open a compact Telegram panel with the connected account,

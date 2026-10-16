@@ -6,7 +6,7 @@ Language = Literal["ru", "en"]
 INSTRUCTIONS: dict[Language, str] = {
     "ru": """<b>Как пользоваться ботом</b>
 
-Бот ищет публикации в Threads по вашим фразам и присылает новые совпадения в рабочий чат.
+Бот ищет фразы в тексте самих постов Threads, без комментариев, и присылает новые совпадения в рабочий чат.
 
 <b>Для начала</b>
 Нажмите «Меню» внизу чата → подключите Threads → добавьте фразы → включите уведомления.
@@ -35,7 +35,7 @@ INSTRUCTIONS: dict[Language, str] = {
 Вернуться к настройкам: кнопка «Меню». Эта инструкция: кнопка «Инструкция». Если нижние кнопки скрыты, раскройте клавиатуру значком рядом с полем ввода. Первый запуск: /start; также доступны /menu и /instructions.""",
     "en": """<b>How to use the bot</b>
 
-The bot searches Threads for your phrases and sends new matches to your work chat.
+The bot finds your phrases in the text of Threads posts, excluding replies, and sends new matches to your work chat.
 
 <b>Getting started</b>
 Tap Menu below → connect Threads → add phrases → enable notifications.

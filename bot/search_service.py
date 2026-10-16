@@ -1,10 +1,20 @@
 from html import escape
+from unicodedata import normalize
 
 from bot.config import SearchMode, SearchType
 from bot.i18n import Language, choose
 from bot.models import SearchResult, ThreadPost
 from bot.threads_client import ThreadsClient
 from bot.threads_oauth import ThreadsNotConnectedError, ThreadsTokenManager
+
+
+def matches_post_text(post: ThreadPost, query: str) -> bool:
+    """Require the literal phrase in a top-level post's own text."""
+    if post.is_reply or not post.text:
+        return False
+    phrase = " ".join(normalize("NFC", query).casefold().split())
+    text = " ".join(normalize("NFC", post.text).casefold().split())
+    return bool(phrase and phrase in text)
 
 
 class SearchService:
@@ -32,13 +42,17 @@ class SearchService:
         limit: int | None = None,
         access_token: str | None = None,
     ) -> SearchResult:
-        return await self._client.keyword_search(
+        result = await self._client.keyword_search(
             query,
             search_type=search_type,
             search_mode=search_mode,
             limit=limit,
             access_token=await self._resolve_token(access_token),
         )
+        if search_mode == SearchMode.KEYWORD:
+            posts = [post for post in result.posts if matches_post_text(post, query)]
+            return SearchResult(query=result.query, posts=posts, total=len(posts))
+        return result
 
     async def search_by_tag(
         self,
@@ -110,15 +124,15 @@ def format_search_result(
         return [
             choose(
                 language,
-                ru=f'По запросу «{escape(result.query)}» ничего не найдено.',
-                en=f'No results found for “{escape(result.query)}”.',
+                ru=f"По запросу «{escape(result.query)}» ничего не найдено.",
+                en=f"No results found for “{escape(result.query)}”.",
             )
         ]
 
     header = choose(
         language,
-        ru=f'🔍 Запрос: <b>{escape(result.query)}</b>\nНайдено: {result.total}',
-        en=f'🔍 Query: <b>{escape(result.query)}</b>\nFound: {result.total}',
+        ru=f"🔍 Запрос: <b>{escape(result.query)}</b>\nНайдено: {result.total}",
+        en=f"🔍 Query: <b>{escape(result.query)}</b>\nFound: {result.total}",
     )
     messages = [header]
 
